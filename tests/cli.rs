@@ -154,6 +154,77 @@ fn verify_says_when_there_is_no_path() {
 }
 
 #[test]
+fn verify_finds_a_path_straight_from_an_anchor_without_chain() {
+    let Some(ex) = examples() else { return };
+    let (code, out, _) = certval(&[
+        "verify",
+        "--anchor",
+        &pkits(&ex, "GoodCACert.crt"),
+        &pkits(&ex, "ValidCertificatePathTest1EE.crt"),
+    ]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("anchor        CN=Good CA"), "{out}");
+}
+
+/// Runs `verify --check-revocation` on `target` beneath Good CA, with the PKITS CRLs named in `crls`.
+fn verify_with_crls(ex: &std::path::Path, target: &str, crls: &[&str]) -> (i32, String, String) {
+    let crl_paths: Vec<String> = crls
+        .iter()
+        .map(|name| {
+            ex.join("PKITS_data_2048/crls")
+                .join(name)
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    let anchor = pkits(ex, "TrustAnchorRootCertificate.crt");
+    let chain = pkits(ex, "GoodCACert.crt");
+    let target = pkits(ex, target);
+    let mut args = vec![
+        "verify",
+        "--check-revocation",
+        "--anchor",
+        &anchor,
+        "--chain",
+        &chain,
+    ];
+    for crl in &crl_paths {
+        args.extend(["--crl", crl]);
+    }
+    args.push(&target);
+    certval(&args)
+}
+
+#[test]
+fn verify_checks_revocation_against_named_crls() {
+    let Some(ex) = examples() else { return };
+    let crls = ["TrustAnchorRootCRL.crl", "GoodCACRL.crl"];
+    let (code, out, _) = verify_with_crls(&ex, "ValidCertificatePathTest1EE.crt", &crls);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("path 0: Valid"), "{out}");
+
+    let (code, out, _) = verify_with_crls(&ex, "InvalidRevokedEETest3EE.crt", &crls);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("CertificateRevokedEndEntity"), "{out}");
+}
+
+#[test]
+fn verify_rejects_a_crl_file_that_holds_no_crl() {
+    let Some(ex) = examples() else { return };
+    let not_a_crl = pkits(&ex, "GoodCACert.crt");
+    let (code, _, err) = certval(&[
+        "verify",
+        "--crl",
+        &not_a_crl,
+        "--anchor",
+        &pkits(&ex, "TrustAnchorRootCertificate.crt"),
+        &pkits(&ex, "ValidCertificatePathTest1EE.crt"),
+    ]);
+    assert_eq!(code, 2);
+    assert!(err.contains("not a CRL"), "{err}");
+}
+
+#[test]
 fn verify_reads_a_pem_bundle() {
     let Some(ex) = examples() else { return };
     let mut bundle = String::new();

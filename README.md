@@ -69,7 +69,8 @@ path 0: SignatureVerificationFailure
 
 `--settings FILE` takes certval's JSON path validation settings: the time of interest, the initial
 policy set, name constraint and key usage handling. Revocation is not checked unless
-`--check-revocation` (or a settings file) asks for it, as with `openssl verify`; when it is, CRLs
+`--check-revocation` (or a settings file) asks for it, as with `openssl verify`. `--crl FILE`
+(repeatable) names CRLs to consult first, as `openssl verify -CRLfile` does; beyond those, CRLs
 and OCSP responses are fetched over the network.
 
 ### `certval ocsp` queries a responder
