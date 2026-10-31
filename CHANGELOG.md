@@ -6,4 +6,4 @@ an increase to the minimum supported Rust version is not treated as a breaking c
 
 Initial release of the `certval` command: `x509`, `crl`, `asn1parse`, `verify` (path validation by
 certval, against anchor files or a compiled-in FPKI or webpki store, with optional revocation
-checking) and `ocsp` (query a responder or describe a saved response). MSRV 1.88.
+checking against CRL files or over the network) and `ocsp` (query a responder or describe a saved response). MSRV 1.88.

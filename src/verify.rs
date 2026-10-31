@@ -2,8 +2,9 @@
 //!
 //! Trust anchors come either from files named with `--anchor` or from a store compiled into the
 //! binary (`--store`). Intermediates come from `--chain` and, for a store that includes one, from the
-//! store's own CA certificates. Every path the sources can assemble is validated and reported, and
-//! the command succeeds when at least one is valid.
+//! store's own CA certificates. CRLs named with `--crl` are consulted when revocation is checked.
+//! Every path the sources can assemble is validated and reported, and the command succeeds when at
+//! least one is valid.
 
 use crate::display;
 use crate::input::{read_certs, read_der};
@@ -36,6 +37,11 @@ pub struct Args {
     /// openssl verify; a settings file can also turn it on
     #[arg(long)]
     pub check_revocation: bool,
+
+    /// CRL to consult when checking revocation, DER or PEM; repeatable. Consulted before any CRL or
+    /// OCSP responder a certificate names
+    #[arg(long, value_name = "FILE")]
+    pub crl: Vec<String>,
 
     /// List the stores this binary contains, then exit
     #[arg(long)]
@@ -123,19 +129,29 @@ pub async fn run(args: &Args) -> Result<bool> {
         pe.add_trust_anchor_source(Box::new(ta_source));
     }
 
-    if !args.chain.is_empty() {
-        let mut cert_source = CertSource::new();
-        for file in &args.chain {
-            for (i, bytes) in read_certs(file)?.into_iter().enumerate() {
-                cert_source.push(CertFile {
-                    filename: format!("{file}#{i}"),
-                    bytes,
-                });
+    // Registered even when --chain names nothing: path building runs only through certificate
+    // sources, so without one a target issued directly by an anchor would find no path.
+    let mut cert_source = CertSource::new();
+    for file in &args.chain {
+        for (i, bytes) in read_certs(file)?.into_iter().enumerate() {
+            cert_source.push(CertFile {
+                filename: format!("{file}#{i}"),
+                bytes,
+            });
+        }
+    }
+    cert_source.initialize(&cps)?;
+    cert_source.find_all_partial_paths(&pe, &cps);
+    pe.add_certificate_source(Box::new(cert_source));
+
+    if !args.crl.is_empty() {
+        let crl_source = MemoryCrlSource::new();
+        for file in &args.crl {
+            if !crl_source.add(&read_der(file)?) {
+                return Err(format!("{file}: not a CRL").into());
             }
         }
-        cert_source.initialize(&cps)?;
-        cert_source.find_all_partial_paths(&pe, &cps);
-        pe.add_certificate_source(Box::new(cert_source));
+        pe.add_crl_source(Box::new(crl_source));
     }
 
     let mut target_cert = PDVCertificate::try_from(read_der(target)?.as_slice())
@@ -147,9 +163,6 @@ pub async fn run(args: &Args) -> Result<bool> {
     let mut paths = vec![];
     match pe.get_paths_for_target(&target_cert, &mut paths, 0, toi) {
         Ok(()) => {}
-        // No certificate source at all (anchors and no --chain): the same outcome as one that
-        // found nothing, for a target issued directly by an anchor or for one with no path.
-        Err(certval::Error::Unrecognized) => {}
         Err(certval::Error::PathValidation(
             PathValidationStatus::InvalidNotAfterDate | PathValidationStatus::InvalidNotBeforeDate,
         )) => {
