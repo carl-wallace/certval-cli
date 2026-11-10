@@ -412,6 +412,7 @@ dependencies = [
  "const-oid",
  "der",
  "log",
+ "pkcs8",
  "spki",
  "windows-sys 0.61.2",
  "x509-cert",

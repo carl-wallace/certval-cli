@@ -5,7 +5,8 @@
 # a matrix of what each choice did with each case.
 #
 #   decrypt  openssl encrypts, certval decrypts: RSA key transport (PKCS #1 v1.5, OAEP with
-#            SHA-1/256/384/512), ECDH on P-256/384/521 with each X9.63 KDF hash, ML-KEM-512/768/1024,
+#            SHA-1/256/384/512), ECDH on P-256/384/521 with each X9.63 KDF hash, standard and
+#            cofactor, ML-KEM-512/768/1024,
 #            AES-CBC and AES-GCM content, and one message to several recipients
 #   encrypt  certval encrypts, openssl decrypts: the same recipient types, plus each key wrap and
 #            user keying material
@@ -501,6 +502,10 @@ if wanted decrypt; then
             for c in aes-128-cbc aes-256-gcm; do
                 decrypt_case "$k ecdh-$h $c" "$k" "$k" ok "$c" "" "-keyopt ecdh_kdf_md:$h"
             done
+        done
+        for h in sha256 sha384 sha512; do
+            decrypt_case "$k ecdh-cofactor-$h aes-256-cbc" "$k" "$k" ok aes-256-cbc "" \
+                "-keyopt ecdh_kdf_md:$h -keyopt ecdh_cofactor_mode:1"
         done
     done
     decrypt_case "p256 ecdh-sha1 (openssl's default) aes-256-cbc" p256 p256 refuse aes-256-cbc "" ""
