@@ -197,6 +197,7 @@ impl CryptoArgs {
                 env.add_decrypt_content_callback(CngCrypto::new());
                 env.add_encrypt_key_transport_callback(CngCrypto::new());
                 env.add_encrypt_key_agreement_callback(CngCrypto::new());
+                env.add_encrypt_kem_callback(CngCrypto::new());
             }
         }
         if self.software() {
@@ -267,11 +268,7 @@ impl CryptoArgs {
             #[cfg(target_os = "macos")]
             Crypto::SecurityFramework => security_framework_key(pkcs8)?,
             #[cfg(windows)]
-            Crypto::Cng => {
-                return Err(
-                    "--crypto cng does not yet sign with a key that has no certificate".into(),
-                )
-            }
+            Crypto::Cng => Box::new(certval_cng::import_pkcs8_key(pkcs8)?),
             Crypto::Pkcs11 => {
                 return Err(
                     "--crypto pkcs11 does not yet sign with a key that has no certificate".into(),
