@@ -44,7 +44,7 @@ certval_stores_fpki = "1.0.0-rc.1"
 certval_stores_webpki_root_certs = "1.0.0-rc.1"
 
 clap = { version = "4.6.7", features = ["derive", "env"] }
-cms = "0.3.0-rc.0"
+cms = "=0.3.0-rc.2"
 const-oid = { version = "0.10.2", features = ["db"] }
 cryptoki = "0.12.0"
 der = { version = "0.8.3", features = ["alloc", "oid", "pem"] }
@@ -60,7 +60,7 @@ signature = "3.0.0"
 spki = "0.8.1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 x509-cert = { version = "0.3.0", features = ["builder"] }
-x509-ocsp = { version = "0.3.0-rc.0", features = ["builder", "std"] }
+x509-ocsp = { version = "=0.3.0-rc.1", features = ["builder", "std"] }
 
 [dev-dependencies]
 # The CMS tests put a key openssl made on a PKCS #11 token, which takes the private scalar.
@@ -92,3 +92,6 @@ certval-security-framework = { path = "../certval-security-framework" }
 # above to the local checkout, so edits take effect without a publish. Leave it commented on anything
 # that is committed, or the build depends on a path that only exists here.
 # certval = { path = "../rust-pki/certval" }
+# certval 0.2.0-rc.3 (SHAKE digests, rsa 0.10.0, cms 0.3.0-rc.2) is not yet on crates.io, so it comes
+# from rust-pki's main until it is published; then this line goes and the requirement moves to rc.3.
+certval = { git = "https://github.com/carl-wallace/rust-pki", branch = "main" }
