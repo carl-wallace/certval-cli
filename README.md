@@ -296,6 +296,19 @@ cargo build --features openssl,cryptokit
 OPENSSL=$(command -v openssl) scripts/openssl-interop.sh -c target/debug/certval
 ```
 
+`scripts/openssl-tamper.sh` is the negative counterpart: openssl encrypts or signs, the script
+changes one octet of one field (an encryptedKey, a KDF or wrap OID, the originator key, the GCM tag,
+nonce or icvLen, the CBC padding, the signature, a signed attribute, the digestAlgorithm), and
+certval must refuse the message for the reason the case names, under every `--crypto` choice. Each
+case runs unbroken first, as a control. Each cell says whether the choice refused it alone (`ok`),
+with software's help (`sw`), or declined (`no`), or whether certval accepted the broken message
+(`ACCEPTED`) or refused it for another reason (`REASON`). It is not part of `cargo test`; `-h`
+gives its options.
+
+```sh
+OPENSSL=$(command -v openssl) scripts/openssl-tamper.sh -c target/debug/certval
+```
+
 certval-cms is not on crates.io yet, and the providers' `cms` features are not released, so
 `Cargo.toml`'s `[patch.crates-io]` takes them from neighboring checkouts (`../certval-cms`,
 `../certval-awslc`, `../certval-cng`, `../certval-openssl`, `../certval-pkcs11`,
