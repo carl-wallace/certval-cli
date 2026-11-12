@@ -18,6 +18,10 @@
 # ML-DSA needs openssl 3.5, and ML-KEM in CMS 3.6; with an older openssl those cases are left
 # out and the summary says so.
 #
+# On Windows the script runs under Git for Windows' bash, with a certval.exe built there (the
+# openssl choice is not offered on Windows). Git's own openssl is 3.1, which leaves ML-DSA and
+# ML-KEM out; -s names a newer one, such as the OpenSSL winget installs.
+#
 # Each field is found with `openssl asn1parse` and changed in place, one octet, so that the
 # message still decodes and the change reaches the check the case is about rather than the
 # decoder. Each case runs first unbroken, as a control: a control certval does not pass proves
@@ -175,7 +179,16 @@ PQ_SIG=0; PQ_KEM=0
 if [ "$major" -gt 3 ] || { [ "$major" = 3 ] && [ "$minor" -ge 5 ]; }; then PQ_SIG=1; fi
 if [ "$major" -gt 3 ] || { [ "$major" = 3 ] && [ "$minor" -ge 6 ]; }; then PQ_KEM=1; fi
 
-export OPENSSL_CONF=$PKI/openssl.cnf
+# Under Git for Windows' bash, certval and openssl are native programs: the shell converts the
+# POSIX paths among their arguments to Windows paths, which keeps WORKDIR usable as it is, but
+# would make a path of -subj's /CN=... too, so that is excluded; and a path in an environment
+# variable is not converted, so OPENSSL_CONF is given a Windows one.
+windows_path() { printf '%s\n' "$1"; }
+case $(uname -s) in
+    MINGW*|MSYS*) export MSYS2_ARG_CONV_EXCL='/CN='; windows_path() { cygpath -m "$1"; } ;;
+esac
+export OPENSSL_CONF
+OPENSSL_CONF=$(windows_path "$PKI/openssl.cnf")
 printf '[req]\ndistinguished_name = dn\n[dn]\n' > "$OPENSSL_CONF"
 if [ -n "$LOG" ]; then
     logcmd cd "$PKI"

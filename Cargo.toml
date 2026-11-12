@@ -12,7 +12,7 @@ keywords = ["x509", "pki", "certval", "ocsp", "cli"]
 readme = "README.md"
 edition = "2021"
 rust-version = "1.89"
-include = ["src/**/*.rs", "README.md", "CHANGELOG.md", "LICENSE-APACHE", "LICENSE-MIT"]
+include = ["src/**/*.rs", "build.rs", "README.md", "CHANGELOG.md", "LICENSE-APACHE", "LICENSE-MIT"]
 
 [[bin]]
 name = "certval"
