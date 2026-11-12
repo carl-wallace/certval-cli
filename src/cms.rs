@@ -508,21 +508,26 @@ fn signer_credential(args: &SignArgs, env: &mut CmsEnvironment) -> Result<Signer
     }
 }
 
-/// A certificate's subject and subject key identifier, or serial number without one.
+/// A certificate's subject on one line and, as a list below it, its issuer, its notAfter, and its
+/// subject key identifier, or serial number without one: enough to choose between certificates for
+/// the same address.
 fn describe_briefly(cert: &Certificate) -> String {
     let tbs = cert.tbs_certificate();
-    match certval_cms::signer_identifier(cert) {
-        Ok(SignerIdentifier::SubjectKeyIdentifier(skid)) => format!(
-            "{}, subject key identifier {}",
-            display::name(tbs.subject()),
-            display::hex(skid.0.as_bytes())
-        ),
-        _ => format!(
-            "{}, serial {}",
-            display::name(tbs.subject()),
-            display::hex(tbs.serial_number().as_bytes())
-        ),
+    let mut subject = display::name(tbs.subject());
+    if subject.is_empty() {
+        subject = String::from("(empty subject)");
     }
+    let id = match certval_cms::signer_identifier(cert) {
+        Ok(SignerIdentifier::SubjectKeyIdentifier(skid)) => {
+            format!("subject key identifier {}", display::hex(skid.0.as_bytes()))
+        }
+        _ => format!("serial {}", display::hex(tbs.serial_number().as_bytes())),
+    };
+    format!(
+        "{subject}\n        - issuer {}\n        - expires {}\n        - {id}",
+        display::name(tbs.issuer()),
+        display::time(&tbs.validity().not_after)
+    )
 }
 
 fn sign(args: &SignArgs) -> Result<bool> {
