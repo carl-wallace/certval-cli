@@ -321,6 +321,8 @@ dependencies = [
 [[package]]
 name = "certval-awslc"
 version = "0.1.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4a1d72fdd5a93c36b3d9ce3c362fad05c5500659c18930fc291a4146eceeaee"
 dependencies = [
  "aws-lc-rs",
  "certval",
@@ -372,6 +374,8 @@ dependencies = [
 [[package]]
 name = "certval-cms"
 version = "0.1.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03f7e86c3cefb2f117a5280e91cb8db04ec6527afe13bac3c8d63d7ba122d022"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -406,6 +410,8 @@ dependencies = [
 [[package]]
 name = "certval-cng"
 version = "0.1.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "677b33fad57a3549a0f6b9438ed90580885528826ce592525a698edc857f853a"
 dependencies = [
  "certval",
  "certval-cms",
@@ -423,6 +429,8 @@ dependencies = [
 [[package]]
 name = "certval-openssl"
 version = "0.1.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbeb29f4499b156033b6b7b47cb2d3a250658d6f1113aad2e99318cc022be49"
 dependencies = [
  "certval",
  "certval-cms",
@@ -440,6 +448,8 @@ dependencies = [
 [[package]]
 name = "certval-pkcs11"
 version = "0.1.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "712ea54ff8cefcdacf18a279a5cc54c7fa569124a78b611147422760640a7130"
 dependencies = [
  "certval",
  "certval-cms",
@@ -457,6 +467,8 @@ dependencies = [
 [[package]]
 name = "certval-security-framework"
 version = "0.1.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89653928b9406ccb78111add1d30021d7a7091264dc3f3349ad3e3ee954fcf9b"
 dependencies = [
  "certval",
  "certval-cms",

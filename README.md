@@ -277,9 +277,9 @@ FIPS build elsewhere, ship the library beside the binary and build with an rpath
 
 ## Not yet
 
-`pkcs12` and `ts` are not here yet: `pkcs12` waits on a PKCS #12 builder on crates.io, and `ts` on
-certval's move to cms `0.3.0-rc.1`. `req` under `--crypto pkcs11` waits on certval-pkcs11
-offering keys that have no certificate.
+`pkcs12` and `ts` are not here yet. `pkcs12` waits on a PKCS #12 builder on crates.io; `ts` is not
+yet written. `req` under `--crypto pkcs11` waits on certval-pkcs11 offering keys that have no
+certificate.
 
 ## Testing
 
@@ -339,12 +339,6 @@ gives its options.
 ```sh
 OPENSSL=$(command -v openssl) scripts/openssl-tamper.sh -c target/debug/certval
 ```
-
-certval-cms is not on crates.io yet, and the providers' `cms` features are not released, so
-`Cargo.toml`'s `[patch.crates-io]` takes them from neighboring checkouts (`../certval-cms`,
-`../certval-awslc`, `../certval-cng`, `../certval-openssl`, `../certval-pkcs11`,
-`../certval-security-framework`), and CI checks them out there. They go when they publish, and this
-crate cannot publish before they do.
 
 ## License
 
