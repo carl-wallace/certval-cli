@@ -205,12 +205,7 @@ side of enveloping are software's. The three flags can be given as `CERTVAL_PKCS
 `CERTVAL_PKCS11_TOKEN_LABEL` and `CERTVAL_PKCS11_USER_PIN`, which keeps the PIN off the command
 line.
 
-`openssl` needs OpenSSL 3 to build, `awslc-fips` CMake and Go, and `cryptokit` Xcode's Swift
-toolchain with the 26 SDK:
-
-```sh
-cargo install certval-cli --features openssl
-```
+Which of these are built in depends on the crate's [features](#crate-feature-flags).
 
 ### Keys an implementation holds
 
@@ -235,6 +230,42 @@ lists them so that one can be chosen with `--skid`.
 certval cms decrypt --in message.der --crypto security-framework
 certval cms sign --in message.txt --email alice@example.com --out signed.der --crypto cng
 ```
+
+## Crate Feature Flags
+
+Four `--crypto` choices are built in without a feature:
+
+- `software`, everywhere.
+- `pkcs11`, everywhere.
+- `security-framework`, on macOS. CryptoKit's ML-KEM and ML-DSA are opt-in, with the `cryptokit`
+  feature below.
+- `cng`, on Windows. CNG's ML-DSA and ML-KEM are always included, and used where the Windows
+  version has them.
+
+Four feature gates add the rest.
+
+- `awslc` is enabled by default. It offers `--crypto aws-lc` on AWS-LC's ordinary build, which
+  needs a C compiler.
+- `awslc-fips` offers `--crypto aws-lc` on AWS-LC's FIPS module in place of its ordinary build. It
+  needs CMake and Go to build, and `awslc` off: aws-lc-rs refuses to build with both, so a FIPS
+  build uses `--no-default-features`, and `--all-features` does not build.
+- `openssl` offers `--crypto openssl`, through the system's OpenSSL 3, which it needs to build. Not
+  offered on Windows.
+- `cryptokit` adds CryptoKit to `--crypto security-framework`, for ML-KEM-768/1024 encryption and
+  decryption and ML-DSA-65/87 signing and verification. It needs Xcode's Swift toolchain with the
+  26 SDK to build and macOS 26 to run, and does nothing elsewhere.
+
+```sh
+cargo install certval-cli --features openssl
+cargo install certval-cli --no-default-features --features awslc-fips
+```
+
+On macOS and Windows, AWS-LC's FIPS module is built as a shared library; Linux x86_64 and aarch64
+link it statically. On macOS the binary refers to it as `@rpath/libaws_lc_fips_<version>_crypto.dylib`
+without setting an rpath, so `cargo run` finds it but running the binary directly does not, and
+`cargo install` leaves a binary that refers to a build directory that no longer exists. To run a
+FIPS build elsewhere, ship the library beside the binary and build with an rpath, for example
+`RUSTFLAGS="-C link-arg=-Wl,-rpath,@executable_path"`.
 
 ## Exit codes
 
