@@ -35,7 +35,7 @@ awslc-fips = ["certval-awslc/fips"]
 cryptokit = ["certval-security-framework/pqc"]
 
 [dependencies]
-certval = { version = "0.2.0-rc.2", features = ["remote", "rsa", "pqc"] }
+certval = { version = "0.2.0-rc.3", features = ["remote", "rsa", "pqc"] }
 certval-cms = { version = "0.1.0-rc.1", features = ["pqc"] }
 certval-awslc = { version = "0.1.0-rc.1", default-features = false, features = ["cms"] }
 certval-pkcs11 = { version = "0.1.0-rc.1", features = ["cms"] }
@@ -92,6 +92,3 @@ certval-security-framework = { path = "../certval-security-framework" }
 # above to the local checkout, so edits take effect without a publish. Leave it commented on anything
 # that is committed, or the build depends on a path that only exists here.
 # certval = { path = "../rust-pki/certval" }
-# certval 0.2.0-rc.3 (SHAKE digests, rsa 0.10.0, cms 0.3.0-rc.2) is not yet on crates.io, so it comes
-# from rust-pki's main until it is published; then this line goes and the requirement moves to rc.3.
-certval = { git = "https://github.com/carl-wallace/rust-pki", branch = "main" }
