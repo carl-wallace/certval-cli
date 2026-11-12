@@ -340,6 +340,17 @@ gives its options.
 OPENSSL=$(command -v openssl) scripts/openssl-tamper.sh -c target/debug/certval
 ```
 
+On Windows, both scripts run under Git for Windows' bash with a `certval.exe` built there, which
+offers `cng` in place of `openssl` and `security-framework`. Git's own openssl is 3.1, which
+leaves the ML-DSA and ML-KEM rows out; `-s` names a newer one, such as the OpenSSL that
+`winget install ShiningLight.OpenSSL.Light` installs. The scripts leave the shell's conversion of
+POSIX paths to Windows ones on, which the binary needs, and exclude `-subj`'s `/CN=...` from it.
+
+```sh
+cargo build
+scripts/openssl-interop.sh -c target/debug/certval -s "/c/Program Files/OpenSSL-Win64/bin/openssl"
+```
+
 ## License
 
 Apache-2.0 OR MIT.

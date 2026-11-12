@@ -244,6 +244,7 @@ fn certval_encrypts_and_openssl_decrypts() {
                     &[
                         "cms",
                         "-decrypt",
+                        "-binary",
                         "-inform",
                         "DER",
                         "-in",
@@ -307,6 +308,7 @@ fn certval_signs_and_openssl_verifies() {
                 &[
                     "cms",
                     "-verify",
+                    "-binary",
                     "-inform",
                     "DER",
                     "-in",
@@ -655,6 +657,7 @@ fn a_key_on_a_token_is_listed_signs_and_decrypts() {
             &[
                 "cms",
                 "-verify",
+                "-binary",
                 "-inform",
                 "DER",
                 "-in",

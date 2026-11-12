@@ -84,14 +84,10 @@ pub fn cryptos() -> Vec<Choice> {
     if cfg!(windows) {
         cryptos.push(Choice {
             name: "cng",
-            // CNG has no X9.63 KDF.
-            declines: &[
-                Case::KeyAgreementEncryption,
-                Case::KemEncryption,
-                Case::KemDecryption,
-                Case::MlDsaSigning,
-                Case::MlDsaVerification,
-            ],
+            // certval-cng performs the X9.63 KDF itself, and ML-KEM and ML-DSA through CNG, which
+            // has them from Windows 11 24H2 with the post-quantum update; on an older Windows the
+            // ML-KEM and ML-DSA cases fail here.
+            declines: &[],
         });
     }
     cryptos
