@@ -1,6 +1,6 @@
 [package]
 name = "certval-cli"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 description = """
 An openssl-style command-line tool for X.509 certificates, CRLs, OCSP and DER, with RFC 5280
 certification path validation by certval.
@@ -36,7 +36,7 @@ cryptokit = ["certval-security-framework/pqc"]
 
 [dependencies]
 certval = { version = "0.2.0-rc.3", features = ["remote", "rsa", "pqc"] }
-certval-cms = { version = "0.1.0-rc.1", features = ["pqc"] }
+certval-cms = { version = "0.1.0-rc.2", features = ["pqc"] }
 certval-awslc = { version = "0.1.0-rc.1", default-features = false, features = ["cms"] }
 certval-pkcs11 = { version = "0.1.0-rc.1", features = ["cms"] }
 certval_stores_core = "0.1.0-rc.1"
@@ -47,7 +47,7 @@ clap = { version = "4.6.7", features = ["derive", "env"] }
 cms = "=0.3.0-rc.2"
 const-oid = { version = "0.10.2", features = ["db"] }
 cryptoki = "0.12.0"
-der = { version = "0.8.3", features = ["alloc", "oid", "pem"] }
+der = { version = "0.8.3", features = ["alloc", "ber", "oid", "pem"] }
 getrandom = { version = "0.4.3", features = ["sys_rng"] }
 pem-rfc7468 = { version = "1.0.0", features = ["alloc"] }
 # `req` reads a key's algorithm to choose the implementation that holds it.

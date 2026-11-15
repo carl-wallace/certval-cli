@@ -338,7 +338,7 @@ dependencies = [
 
 [[package]]
 name = "certval-cli"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "certval",
  "certval-awslc",
@@ -373,9 +373,9 @@ dependencies = [
 
 [[package]]
 name = "certval-cms"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03f7e86c3cefb2f117a5280e91cb8db04ec6527afe13bac3c8d63d7ba122d022"
+checksum = "62288a2ed332626656688e02490022c99dd393fc7f9062fd78f550567b86546d"
 dependencies = [
  "aes",
  "aes-gcm",
