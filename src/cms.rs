@@ -680,7 +680,7 @@ pub(crate) fn read_certificate(file: &str) -> Result<Certificate> {
 }
 
 fn read_message(file: &str) -> Result<ContentInfo> {
-    Ok(ContentInfo::from_der(&read_der(file)?)
+    Ok(ContentInfo::from_ber(&read_der(file)?)
         .map_err(|e| format!("{file}: not a CMS message: {e}"))?)
 }
 
