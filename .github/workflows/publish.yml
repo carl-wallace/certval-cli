@@ -29,6 +29,10 @@ env:
 jobs:
   # The release must still be a draft: a published one is what people have downloaded.
   check:
+    # A draft is visible only with write access, so reading one needs contents: write, though
+    # this job changes nothing.
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -45,6 +49,10 @@ jobs:
   verify-macos:
     needs: check
     if: inputs.require_signatures
+    # A draft is visible only with write access, so reading one needs contents: write, though
+    # this job changes nothing.
+    permissions:
+      contents: write
     runs-on: macos-latest
     timeout-minutes: 10
     env:
@@ -79,6 +87,10 @@ jobs:
   verify-windows:
     needs: check
     if: inputs.require_signatures
+    # A draft is visible only with write access, so reading one needs contents: write, though
+    # this job changes nothing.
+    permissions:
+      contents: write
     runs-on: windows-latest
     timeout-minutes: 10
     env:
