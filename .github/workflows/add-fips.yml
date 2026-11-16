@@ -1,0 +1,357 @@
+# Builds certval-fips, the certval command with FIPS-validated cryptographic modules, from an
+# existing release's tag, and puts it in a staging draft release for its macOS and Windows binaries
+# to be signed; publish-fips.yml then adds it to that release. The release's own files are not
+# touched: this only adds to them. Run by hand:
+#
+#   gh workflow run add-fips.yml --repo carl-wallace/certval-cli -f release_tag=certval-cli-v<version>
+#
+# The staging draft's tag is <release_tag>-fips-staging, made at the release tag's commit; it is
+# deleted when publish-fips.yml has moved its files into the release.
+#
+# What certval-fips holds, by platform:
+#   Linux    AWS-LC's FIPS module (linked statically), and OpenSSL through the system's OpenSSL 3,
+#            whose FIPS provider the system configures
+#   macOS    AWS-LC's FIPS module (a dylib beside the binary), and OpenSSL 3.5 with the FIPS
+#            provider from OpenSSL 3.0.9, the validated one, bundled; a script in the archive runs
+#            openssl fipsinstall, which OpenSSL's FIPS rules require on the machine it runs on
+#   Windows  AWS-LC's FIPS module (a DLL beside the binary); certval-cli offers no OpenSSL there
+# Each build is checked to hold aws-lc-fips-sys and not aws-lc-sys, and smoke-tested through each
+# FIPS module alone: a FIPS module tests itself when it loads and stops the process if a test fails.
+name: add-fips
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "The published release (certval-cli-v<version>) to add certval-fips to"
+        required: true
+
+env:
+  OPENSSL_VERSION: 3.5.5
+  OPENSSL_SHA256: b28c91532a8b65a1f983b4c28b7488174e4a01008e29ce8e69bd789f28bc2a89
+  FIPS_VERSION: 3.0.9
+  FIPS_SHA256: eb1ab04781474360f77c318ab89d8c5a03abc38e63d65a603cabbf1b00a1dc90
+  RELEASE_TAG: ${{ inputs.release_tag }}
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag }}
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/rust-pki
+          ref: 93104f49a8083f1e527e3b4e830581b917674e2f
+          path: rust-pki
+          sparse-checkout: certval/tests/examples/PKITS_data_2048
+      # The FIPS READMEs and setup script are this workflow's, not the release tag's, which
+      # predates them.
+      - uses: actions/checkout@v7
+        with:
+          path: support
+          sparse-checkout: .github/release
+      - run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config cmake
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.24"
+      - uses: dtolnay/rust-toolchain@stable
+      - id: version
+        run: echo "version=${RELEASE_TAG#certval-cli-v}" >> "$GITHUB_OUTPUT"
+      - name: The build holds AWS-LC's FIPS module and not its ordinary build
+        run: |
+          cargo tree --locked --no-default-features --features awslc-fips,openssl \
+            --prefix none --format '{p}' > deps.txt
+          grep -q '^aws-lc-fips-sys ' deps.txt
+          if grep '^aws-lc-sys ' deps.txt; then echo "the ordinary AWS-LC is in the FIPS build"; exit 1; fi
+      - run: cargo build --release --locked --bin certval --no-default-features --features awslc-fips,openssl
+      # The runner's OpenSSL 3.0 with the 3.0.9 FIPS provider loaded, as certval-openssl's CI does,
+      # so that the OpenSSL path is smoke-tested under FIPS.
+      - name: Build the 3.0.9 FIPS provider
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o fips.tar.gz \
+            "https://github.com/openssl/openssl/releases/download/openssl-${FIPS_VERSION}/openssl-${FIPS_VERSION}.tar.gz"
+          echo "${FIPS_SHA256}  fips.tar.gz" | sha256sum -c -
+          tar xzf fips.tar.gz
+          cd "openssl-${FIPS_VERSION}"
+          ./Configure enable-fips --prefix="$RUNNER_TEMP/fips" --libdir=lib > /dev/null
+          make -j"$(nproc)" > /dev/null
+          make install_fips > /dev/null
+      - name: Smoke test
+        run: |
+          bin=target/release/certval
+          certs=rust-pki/certval/tests/examples/PKITS_data_2048/certs
+          verify() {
+            "$bin" verify --crypto "$1" --only --anchor "$certs/TrustAnchorRootCertificate.crt" \
+              --chain "$certs/GoodCACert.crt" "$certs/ValidCertificatePathTest1EE.crt"
+          }
+          "$bin" --version
+          verify aws-lc | tee smoke.txt
+          grep -q "path 0: Valid" smoke.txt
+          cat > fips.cnf <<EOF
+          openssl_conf = openssl_init
+          .include $RUNNER_TEMP/fips/ssl/fipsmodule.cnf
+          [openssl_init]
+          providers = provider_sect
+          alg_section = algorithm_sect
+          [provider_sect]
+          fips = fips_sect
+          base = base_sect
+          [base_sect]
+          activate = 1
+          [algorithm_sect]
+          default_properties = fips=yes
+          EOF
+          OPENSSL_CONF=$PWD/fips.cnf OPENSSL_MODULES=$RUNNER_TEMP/fips/lib/ossl-modules verify openssl | tee smoke.txt
+          grep -q "path 0: Valid" smoke.txt
+      - name: Package
+        run: |
+          name=certval-cli-fips-${{ steps.version.outputs.version }}-x86_64-unknown-linux-gnu
+          mkdir "$name"
+          cp target/release/certval "$name/certval-fips"
+          cp README.md CHANGELOG.md LICENSE-APACHE LICENSE-MIT "$name"/
+          cp support/.github/release/FIPS-linux.md "$name/FIPS.md"
+          tar czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fips-linux
+          path: certval-cli-fips-*.tar.gz
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag }}
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/rust-pki
+          ref: 93104f49a8083f1e527e3b4e830581b917674e2f
+          path: rust-pki
+          sparse-checkout: certval/tests/examples/PKITS_data_2048
+      # The FIPS READMEs and setup script are this workflow's, not the release tag's, which
+      # predates them.
+      - uses: actions/checkout@v7
+        with:
+          path: support
+          sparse-checkout: .github/release
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.24"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - id: version
+        run: echo "version=${RELEASE_TAG#certval-cli-v}" >> "$GITHUB_OUTPUT"
+      - name: Cache the OpenSSL builds
+        id: openssl-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/ossl
+          key: macos-openssl-${{ env.OPENSSL_VERSION }}-fips-${{ env.FIPS_VERSION }}-universal-v1
+      # For each architecture: OpenSSL 3.5's libraries, and 3.0.9 with its FIPS provider and a
+      # static openssl command for fipsinstall.
+      - name: Build OpenSSL
+        if: steps.openssl-cache.outputs.cache-hit != 'true'
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o ossl.tar.gz \
+            "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
+          echo "${OPENSSL_SHA256}  ossl.tar.gz" | shasum -a 256 -c -
+          curl -fsSL -o fips.tar.gz \
+            "https://github.com/openssl/openssl/releases/download/openssl-${FIPS_VERSION}/openssl-${FIPS_VERSION}.tar.gz"
+          echo "${FIPS_SHA256}  fips.tar.gz" | shasum -a 256 -c -
+          for arch in arm64 x86_64; do
+            rm -rf "openssl-${OPENSSL_VERSION}" "openssl-${FIPS_VERSION}"
+            tar xzf ossl.tar.gz
+            ( cd "openssl-${OPENSSL_VERSION}" && ./Configure "darwin64-$arch" no-docs \
+                --prefix="$HOME/ossl/libs-$arch" --libdir=lib > /dev/null \
+              && make -j"$(sysctl -n hw.ncpu)" > /dev/null && make install_sw > /dev/null )
+            tar xzf fips.tar.gz
+            ( cd "openssl-${FIPS_VERSION}" && ./Configure "darwin64-$arch" enable-fips no-shared \
+                --prefix="$HOME/ossl/fips-$arch" --libdir=lib > /dev/null \
+              && make -j"$(sysctl -n hw.ncpu)" > /dev/null && make install_sw install_fips > /dev/null )
+          done
+      - name: The build holds AWS-LC's FIPS module and not its ordinary build
+        run: |
+          cargo tree --locked --no-default-features --features awslc-fips,openssl,cryptokit \
+            --target aarch64-apple-darwin --prefix none --format '{p}' > deps.txt
+          grep -q '^aws-lc-fips-sys ' deps.txt
+          if grep '^aws-lc-sys ' deps.txt; then echo "the ordinary AWS-LC is in the FIPS build"; exit 1; fi
+      - name: Build
+        run: |
+          export AARCH64_APPLE_DARWIN_OPENSSL_DIR=$HOME/ossl/libs-arm64
+          export X86_64_APPLE_DARWIN_OPENSSL_DIR=$HOME/ossl/libs-x86_64
+          for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked --bin certval --target "$t" \
+              --no-default-features --features awslc-fips,openssl,cryptokit
+          done
+      # One universal bundle: the binary and every library combined with lipo, and every reference
+      # between them made relative, so that it runs wherever it is unpacked.
+      - name: Assemble
+        id: bundle
+        run: |
+          name=certval-cli-fips-${{ steps.version.outputs.version }}-universal-apple-darwin
+          b=$PWD/$name
+          mkdir -p "$b/lib/ossl-modules" "$b/libexec"
+          lipo -create -output "$b/certval-fips" \
+            target/aarch64-apple-darwin/release/certval target/x86_64-apple-darwin/release/certval
+          awslc=$(otool -L target/aarch64-apple-darwin/release/certval | awk '/libaws_lc_fips/ {print $1}' | sed 's#@rpath/##')
+          lipo -create -output "$b/$awslc" \
+            "$(find target/aarch64-apple-darwin/release/build -name "$awslc" | head -1)" \
+            "$(find target/x86_64-apple-darwin/release/build -name "$awslc" | head -1)"
+          for lib in libcrypto.3.dylib libssl.3.dylib; do
+            lipo -create -output "$b/lib/$lib" "$HOME/ossl/libs-arm64/lib/$lib" "$HOME/ossl/libs-x86_64/lib/$lib"
+          done
+          lipo -create -output "$b/lib/ossl-modules/fips.dylib" \
+            "$HOME/ossl/fips-arm64/lib/ossl-modules/fips.dylib" "$HOME/ossl/fips-x86_64/lib/ossl-modules/fips.dylib"
+          lipo -create -output "$b/libexec/openssl-fipsinstall" \
+            "$HOME/ossl/fips-arm64/bin/openssl" "$HOME/ossl/fips-x86_64/bin/openssl"
+          chmod u+w "$b"/lib/*.dylib
+          install_name_tool -id @rpath/libcrypto.3.dylib "$b/lib/libcrypto.3.dylib"
+          install_name_tool -id @rpath/libssl.3.dylib "$b/lib/libssl.3.dylib"
+          install_name_tool -add_rpath @loader_path "$b/lib/libssl.3.dylib"
+          for arch in arm64 x86_64; do
+            install_name_tool -change "$HOME/ossl/libs-$arch/lib/libcrypto.3.dylib" @rpath/libcrypto.3.dylib "$b/lib/libssl.3.dylib"
+            install_name_tool -change "$HOME/ossl/libs-$arch/lib/libssl.3.dylib" @rpath/libssl.3.dylib \
+              -change "$HOME/ossl/libs-$arch/lib/libcrypto.3.dylib" @rpath/libcrypto.3.dylib "$b/certval-fips"
+          done
+          install_name_tool -add_rpath @executable_path -add_rpath @executable_path/lib "$b/certval-fips"
+          # Nothing may still point at the build machine.
+          if otool -L "$b/certval-fips" "$b"/lib/*.dylib | grep -E "$HOME|/Users/runner"; then exit 1; fi
+          cp support/.github/release/fips-setup.sh "$b/fips-setup.sh"
+          chmod +x "$b/fips-setup.sh"
+          cp support/.github/release/FIPS-macos.md "$b/FIPS.md"
+          cp README.md CHANGELOG.md LICENSE-APACHE LICENSE-MIT "$b"/
+          echo "dir=$name" >> "$GITHUB_OUTPUT"
+      # As a user would: run the setup script, then each FIPS module alone, then a control with the
+      # FIPS provider removed, which must not validate.
+      - name: Smoke test
+        run: |
+          b=${{ steps.bundle.outputs.dir }}
+          certs=rust-pki/certval/tests/examples/PKITS_data_2048/certs
+          verify() {
+            "$b/certval-fips" verify --crypto "$1" --only --anchor "$certs/TrustAnchorRootCertificate.crt" \
+              --chain "$certs/GoodCACert.crt" "$certs/ValidCertificatePathTest1EE.crt"
+          }
+          cp -R "$b" smoke && b=smoke
+          lipo -archs "$b/certval-fips"
+          "$b/certval-fips" --version
+          verify aws-lc | tee smoke.txt
+          grep -q "path 0: Valid" smoke.txt
+          "$b/fips-setup.sh"
+          export OPENSSL_CONF=$PWD/$b/ssl/openssl.cnf OPENSSL_MODULES=$PWD/$b/lib/ossl-modules
+          verify openssl | tee smoke.txt
+          grep -q "path 0: Valid" smoke.txt
+          mv "$b/lib/ossl-modules/fips.dylib" fips.dylib.aside
+          if verify openssl | grep -q "path 0: Valid"; then echo "validated without the FIPS provider"; exit 1; fi
+      - name: Package
+        run: tar czf "${{ steps.bundle.outputs.dir }}.tar.gz" "${{ steps.bundle.outputs.dir }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fips-macos
+          path: certval-cli-fips-*.tar.gz
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag }}
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/rust-pki
+          ref: 93104f49a8083f1e527e3b4e830581b917674e2f
+          path: rust-pki
+          sparse-checkout: certval/tests/examples/PKITS_data_2048
+      # The FIPS READMEs and setup script are this workflow's, not the release tag's, which
+      # predates them.
+      - uses: actions/checkout@v7
+        with:
+          path: support
+          sparse-checkout: .github/release
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.24"
+      # AWS-LC's FIPS build on Windows assembles with NASM and builds with CMake's Ninja generator.
+      - run: choco install -y nasm ninja
+      - run: echo "C:/Program Files/NASM" >> "$GITHUB_PATH"
+      - uses: dtolnay/rust-toolchain@stable
+      - id: version
+        run: echo "version=${RELEASE_TAG#certval-cli-v}" >> "$GITHUB_OUTPUT"
+      - name: The build holds AWS-LC's FIPS module and not its ordinary build
+        run: |
+          cargo tree --locked --no-default-features --features awslc-fips \
+            --prefix none --format '{p}' > deps.txt
+          grep -q '^aws-lc-fips-sys ' deps.txt
+          if grep '^aws-lc-sys ' deps.txt; then echo "the ordinary AWS-LC is in the FIPS build"; exit 1; fi
+      - run: cargo build --release --locked --bin certval --no-default-features --features awslc-fips
+      - name: Assemble
+        id: bundle
+        run: |
+          name=certval-cli-fips-${{ steps.version.outputs.version }}-x86_64-pc-windows-msvc
+          mkdir "$name"
+          cp target/release/certval.exe "$name/certval-fips.exe"
+          dll=$(find target/release/build -name 'aws_lc_fips_*crypto.dll' | head -1)
+          [ -n "$dll" ] || { echo "no AWS-LC FIPS DLL in the build"; exit 1; }
+          cp "$dll" "$name"/
+          cp README.md CHANGELOG.md LICENSE-APACHE LICENSE-MIT "$name"/
+          cp support/.github/release/FIPS-windows.md "$name/FIPS.md"
+          echo "dir=$name" >> "$GITHUB_OUTPUT"
+      - name: Smoke test
+        run: |
+          b=${{ steps.bundle.outputs.dir }}
+          certs=rust-pki/certval/tests/examples/PKITS_data_2048/certs
+          "$b/certval-fips.exe" --version
+          "$b/certval-fips.exe" verify --crypto aws-lc --only --anchor "$certs/TrustAnchorRootCertificate.crt" \
+            --chain "$certs/GoodCACert.crt" "$certs/ValidCertificatePathTest1EE.crt" | tee smoke.txt
+          grep -q "path 0: Valid" smoke.txt
+      - name: Package
+        run: 7z a "${{ steps.bundle.outputs.dir }}.zip" "${{ steps.bundle.outputs.dir }}" > /dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fips-windows
+          path: certval-cli-fips-*.zip
+          if-no-files-found: error
+
+  staging:
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      # As release.yml does: the archives as built, which is checked before what is in them is
+      # signed.
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/certval-cli-fips-*
+      - name: Staging draft
+        run: |
+          draft=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          if [ "$draft" != false ]; then echo "$RELEASE_TAG is not a published release"; exit 1; fi
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)
+          gh release create "$RELEASE_TAG-fips-staging" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$sha" \
+            --draft \
+            --title "certval-fips for $RELEASE_TAG (staging)" \
+            --notes "certval-fips built from $RELEASE_TAG ($sha), for signing. publish-fips.yml adds these files to the $RELEASE_TAG release and deletes this draft."
