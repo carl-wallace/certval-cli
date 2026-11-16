@@ -1,0 +1,175 @@
+# Builds the certval command for Linux, macOS and Windows and publishes the binaries as a GitHub
+# release. A push of a tag named certval-cli-v<version> publishes; <version> must be the version in
+# Cargo.toml.
+#
+# A manual run builds and smoke-tests the same binaries and keeps them as workflow artifacts, without
+# publishing anything, which is how to try a change to this workflow before tagging. A manual run
+# given release_tag builds from that existing tag and publishes it: the way a tag pushed before this
+# workflow existed gets a release.
+#
+# The release notes, and the README.md attached to the release, come from .github/release/README.md
+# as it stands where this workflow runs from (the tag, or on a manual run the branch it is run on),
+# not from the tag being built, so a release of an older tag gets the current text.
+name: release
+
+on:
+  push:
+    tags: ["certval-cli-v*"]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing tag (certval-cli-v<version>) to build and publish; empty to build without publishing"
+        required: false
+        default: ""
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 22.04 rather than ubuntu-latest so the binary needs only glibc 2.35, and runs on older
+          # distributions as well as current ones. AWS-LC and rustls are linked statically and the
+          # openssl feature is left off, so glibc is the only system library the binary loads; the
+          # release README says how to build with openssl.
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            features: ""
+            crypto: aws-lc
+            archive: tar.gz
+          # cryptokit compiles certval-security-framework's Swift shim, which needs the macOS 26
+          # SDK. The shim checks for macOS 26 before each CryptoKit call, so the binary runs on
+          # older macOS with those algorithms left to software.
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            features: "--features cryptokit"
+            crypto: security-framework
+            archive: tar.gz
+          # build.rs gives the binary an 8 MB main-thread stack on Windows.
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            features: ""
+            crypto: cng
+            archive: zip
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      # The PKITS files the smoke test validates, from the rust-pki commit ci.yml's test job pins;
+      # bump both together.
+      - uses: actions/checkout@v7
+        with:
+          repository: carl-wallace/rust-pki
+          ref: 93104f49a8083f1e527e3b4e830581b917674e2f
+          path: rust-pki
+          sparse-checkout: certval/tests/examples/PKITS_data_2048
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Read the version
+        id: version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "certval-cli") | .version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: The tag names the version being built
+        if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
+        run: |
+          tag=${RELEASE_TAG:-$GITHUB_REF_NAME}
+          if [ "$tag" != "certval-cli-v${{ steps.version.outputs.version }}" ]; then
+            echo "tag $tag does not match certval-cli ${{ steps.version.outputs.version }}"
+            exit 1
+          fi
+      - run: cargo build --release --locked --bin certval --target ${{ matrix.target }} ${{ matrix.features }}
+      # A PKITS path validated by software, then by the platform's implementation alone (--only),
+      # so that a provider that fails to load or answer fails the build.
+      - name: Smoke test
+        run: |
+          bin=target/${{ matrix.target }}/release/certval
+          certs=rust-pki/certval/tests/examples/PKITS_data_2048/certs
+          "$bin" --version
+          "$bin" verify --list-stores
+          for crypto in software ${{ matrix.crypto }}; do
+            only=""
+            if [ "$crypto" != software ]; then only=--only; fi
+            "$bin" verify --crypto "$crypto" $only \
+              --anchor "$certs/TrustAnchorRootCertificate.crt" \
+              --chain "$certs/GoodCACert.crt" \
+              "$certs/ValidCertificatePathTest1EE.crt" | tee smoke.txt
+            grep -q "path 0: Valid" smoke.txt
+          done
+      - name: Package
+        id: package
+        run: |
+          name=certval-cli-${{ steps.version.outputs.version }}-${{ matrix.target }}
+          exe=""
+          if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
+          mkdir "$name"
+          cp target/${{ matrix.target }}/release/certval$exe "$name"/
+          cp README.md CHANGELOG.md LICENSE-APACHE LICENSE-MIT "$name"/
+          if [ "${{ matrix.archive }}" = zip ]; then
+            7z a "$name.zip" "$name" > /dev/null
+          else
+            tar czf "$name.tar.gz" "$name"
+          fi
+          echo "file=$name.${{ matrix.archive }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ steps.package.outputs.file }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/release
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum certval-cli-* | tee SHA256SUMS
+      # A provenance attestation for each archive, checked with `gh attestation verify <file>
+      # --repo carl-wallace/certval-cli`: it ties the file to this workflow run and the tagged commit.
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/certval-cli-*
+      - name: README
+        run: |
+          tag=${RELEASE_TAG:-$GITHUB_REF_NAME}
+          version=${tag#certval-cli-v}
+          sed -e "s/@VERSION@/$version/g" -e "s/@TAG@/$tag/g" .github/release/README.md > dist/README.md
+          cat dist/README.md
+      - name: Publish
+        run: |
+          tag=${RELEASE_TAG:-$GITHUB_REF_NAME}
+          version=${tag#certval-cli-v}
+          prerelease=""
+          case "$version" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$tag" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "certval-cli $version" \
+            --notes-file dist/README.md \
+            $prerelease
