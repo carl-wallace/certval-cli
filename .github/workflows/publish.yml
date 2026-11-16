@@ -1,0 +1,159 @@
+# Publishes a draft release that release.yml made, once its macOS and Windows archives hold signed
+# binaries: checks the signatures, writes SHA256SUMS and a build provenance attestation over the
+# files the release holds now, and takes the release out of draft. Run by hand:
+#
+#   gh workflow run publish.yml --repo carl-wallace/certval-cli -f tag=certval-cli-v<version>
+#
+# require_signatures (default true) refuses to publish unless the macOS binary carries Red Hound
+# Software's Developer ID signature and the Windows binary its Authenticode signature, each
+# timestamped. Set it false to publish a release whose binaries were not signed, e.g. a release
+# candidate; the notes then say so.
+name: publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The draft release's tag (certval-cli-v<version>)"
+        required: true
+      require_signatures:
+        description: "Refuse to publish unless the macOS and Windows binaries are signed"
+        type: boolean
+        default: true
+
+# Names the signer every signature must carry. The macOS one is the Developer ID identity's team.
+env:
+  SIGNER: "Red Hound Software, Inc."
+  APPLE_TEAM_ID: M355KP63QV
+
+jobs:
+  # The release must still be a draft: a published one is what people have downloaded.
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - run: |
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          if [ "$draft" != true ]; then
+            echo "release $TAG is not a draft"
+            exit 1
+          fi
+
+  verify-macos:
+    needs: check
+    if: inputs.require_signatures
+    runs-on: macos-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Download
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*-apple-darwin.tar.gz' --dir dist
+      # codesign --verify checks the signature is intact; the display shows who made it, that the
+      # hardened runtime notarization requires is on, and that it is timestamped.
+      - name: The binary is signed by Red Hound Software
+        run: |
+          for archive in dist/*.tar.gz; do
+            tar xzf "$archive" -C dist
+          done
+          for bin in dist/*/certval; do
+            codesign --verify --strict --verbose=2 "$bin"
+            info=$(codesign -dv --verbose=2 "$bin" 2>&1)
+            echo "$info"
+            echo "$info" | grep -qF "Authority=Developer ID Application: $SIGNER ($APPLE_TEAM_ID)"
+            echo "$info" | grep -qF "TeamIdentifier=$APPLE_TEAM_ID"
+            echo "$info" | grep -q "flags=.*runtime"
+            echo "$info" | grep -q "^Timestamp="
+            # Gatekeeper's own verdict, which for a notarized binary names the notarization. A bare
+            # binary cannot carry a stapled ticket, so this asks Apple, as Gatekeeper would.
+            spctl --assess --type execute --verbose=2 "$bin" 2>&1 | tee spctl.txt
+            grep -q "source=Notarized Developer ID" spctl.txt
+          done
+
+  verify-windows:
+    needs: check
+    if: inputs.require_signatures
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Download
+        shell: bash
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*-pc-windows-msvc.zip' --dir dist
+      # Valid means the signature is intact and chains to a root Windows trusts; the timestamp keeps
+      # it valid after the certificate expires.
+      - name: The binary is signed by Red Hound Software
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -Filter *.zip | ForEach-Object { Expand-Archive $_.FullName -DestinationPath dist }
+          $exes = Get-ChildItem dist -Recurse -Filter certval.exe
+          if (-not $exes) { throw "no certval.exe in the Windows archive" }
+          foreach ($exe in $exes) {
+            $sig = Get-AuthenticodeSignature $exe.FullName
+            $sig | Format-List Status, StatusMessage, SignerCertificate, TimeStamperCertificate
+            if ($sig.Status -ne 'Valid') { throw "$($exe.Name): signature status $($sig.Status)" }
+            if ($sig.SignerCertificate.Subject -notlike "*$env:SIGNER*") {
+              throw "$($exe.Name): signed by $($sig.SignerCertificate.Subject)"
+            }
+            if (-not $sig.TimeStamperCertificate) { throw "$($exe.Name): signature is not timestamped" }
+          }
+
+  publish:
+    needs: [check, verify-macos, verify-windows]
+    # The verify jobs are skipped when signatures are not required; anything else must have passed.
+    if: >-
+      always() && needs.check.result == 'success' &&
+      (needs.verify-macos.result == 'success' || needs.verify-macos.result == 'skipped') &&
+      (needs.verify-windows.result == 'success' || needs.verify-windows.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+      SIGNED: ${{ inputs.require_signatures }}
+    steps:
+      - name: Download
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'certval-cli-*' --dir dist
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum certval-cli-* | tee SHA256SUMS
+      # Over the files as published, signed binaries included, so `gh attestation verify <file>
+      # --repo carl-wallace/certval-cli` holds for what people download.
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/certval-cli-*
+      - name: Notes
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
+          if [ "$SIGNED" = true ]; then
+            cat >> notes.md <<EOF
+
+          ## Signatures
+
+          The macOS binary is signed with $SIGNER's Developer ID and notarized by Apple; the Windows
+          binary is signed with $SIGNER's code-signing certificate. Both signatures are timestamped.
+          EOF
+          else
+            cat >> notes.md <<'EOF'
+
+          ## Signatures
+
+          The binaries in this release are not code-signed. macOS and Windows may ask before running
+          a downloaded one; SHA256SUMS and the build provenance attestations still identify what was
+          built.
+          EOF
+          fi
+      - name: Publish
+        run: |
+          gh release upload "$TAG" dist/SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md --draft=false

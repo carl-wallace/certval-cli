@@ -1,5 +1,5 @@
-certval-cli @VERSION@: the `certval` command for Linux (x86_64, glibc 2.35 or later), macOS (Apple
-silicon) and Windows (x86_64). Each archive holds the binary, the README, the changelog and the
+certval-cli @VERSION@: the `certval` command for Linux (x86_64, glibc 2.35 or later), macOS (one
+universal binary, for Apple silicon and Intel) and Windows (x86_64). Each archive holds the binary, the README, the changelog and the
 licenses. SHA256SUMS lists each archive's SHA-256, and each archive carries a build provenance
 attestation, checked with `gh attestation verify <archive> --repo carl-wallace/certval-cli`.
 
