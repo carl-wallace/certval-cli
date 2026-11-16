@@ -238,8 +238,9 @@ jobs:
               -change "$HOME/ossl/libs-$arch/lib/libcrypto.3.dylib" @rpath/libcrypto.3.dylib "$b/certval-fips"
           done
           install_name_tool -add_rpath @executable_path -add_rpath @executable_path/lib "$b/certval-fips"
-          # Nothing may still point at the build machine.
-          if otool -L "$b/certval-fips" "$b"/lib/*.dylib | grep -E "$HOME|/Users/runner"; then exit 1; fi
+          # Nothing may still point at the build machine. otool's own header lines name the files
+          # (which are under $HOME too); the libraries they load are the lines indented with a tab.
+          if otool -L "$b/certval-fips" "$b"/lib/*.dylib | grep -E "^"$'\t'".*$HOME"; then exit 1; fi
           cp support/.github/release/fips-setup.sh "$b/fips-setup.sh"
           chmod +x "$b/fips-setup.sh"
           cp support/.github/release/FIPS-macos.md "$b/FIPS.md"
