@@ -1,10 +1,17 @@
-# Builds the certval command for Linux, macOS and Windows and publishes the binaries as a GitHub
-# release. A push of a tag named certval-cli-v<version> publishes; <version> must be the version in
+# Builds the certval command for Linux, macOS and Windows and puts the binaries in a draft GitHub
+# release, for the macOS and Windows binaries to be signed and the release published by publish.yml.
+# A push of a tag named certval-cli-v<version> makes the draft; <version> must be the version in
 # Cargo.toml.
 #
+# Everything but the signatures is done here, from the tag, so that what is signed is what CI built:
+# each archive carries a build provenance attestation, which is checked before what is in it is
+# signed. Signing replaces the macOS and Windows archives in the draft with archives of the signed
+# binaries, under the same names; publish.yml then checks the signatures, writes SHA256SUMS and an
+# attestation over the final files, and publishes.
+#
 # A manual run builds and smoke-tests the same binaries and keeps them as workflow artifacts, without
-# publishing anything, which is how to try a change to this workflow before tagging. A manual run
-# given release_tag builds from that existing tag and publishes it: the way a tag pushed before this
+# making a release, which is how to try a change to this workflow before tagging. A manual run given
+# release_tag builds from that existing tag and makes its draft: the way a tag pushed before this
 # workflow existed gets a release.
 #
 # The release notes, and the README.md attached to the release, come from .github/release/README.md
@@ -18,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Existing tag (certval-cli-v<version>) to build and publish; empty to build without publishing"
+        description: "Existing tag (certval-cli-v<version>) to build and make a draft release of; empty to build without one"
         required: false
         default: ""
 
@@ -37,20 +44,28 @@ jobs:
           # release README says how to build with openssl.
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            builds: x86_64-unknown-linux-gnu
+            rust_targets: x86_64-unknown-linux-gnu
             features: ""
             crypto: aws-lc
             archive: tar.gz
-          # cryptokit compiles certval-security-framework's Swift shim, which needs the macOS 26
-          # SDK. The shim checks for macOS 26 before each CryptoKit call, so the binary runs on
-          # older macOS with those algorithms left to software.
+          # One universal binary, for Apple silicon and Intel Macs alike: both are built and
+          # combined with lipo, under the name cargo-binstall looks for on any Mac. cryptokit
+          # compiles certval-security-framework's Swift shim, which needs the macOS 26 SDK; the shim
+          # checks for macOS 26 before each CryptoKit call, so the binary runs on older macOS with
+          # those algorithms left to software.
           - os: macos-latest
-            target: aarch64-apple-darwin
+            target: universal-apple-darwin
+            builds: aarch64-apple-darwin x86_64-apple-darwin
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
             features: "--features cryptokit"
             crypto: security-framework
             archive: tar.gz
           # build.rs gives the binary an 8 MB main-thread stack on Windows.
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            builds: x86_64-pc-windows-msvc
+            rust_targets: x86_64-pc-windows-msvc
             features: ""
             crypto: cng
             archive: zip
@@ -73,7 +88,7 @@ jobs:
           sparse-checkout: certval/tests/examples/PKITS_data_2048
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.rust_targets }}
       - name: Read the version
         id: version
         run: |
@@ -88,12 +103,32 @@ jobs:
             echo "tag $tag does not match certval-cli ${{ steps.version.outputs.version }}"
             exit 1
           fi
-      - run: cargo build --release --locked --bin certval --target ${{ matrix.target }} ${{ matrix.features }}
+      - name: Build
+        run: |
+          for t in ${{ matrix.builds }}; do
+            cargo build --release --locked --bin certval --target "$t" ${{ matrix.features }}
+          done
+      # The binary to package: the one build, or on macOS the two combined.
+      - name: Combine
+        id: bin
+        run: |
+          exe=""
+          if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
+          if [ "$RUNNER_OS" = macOS ]; then
+            mkdir -p universal
+            lipo -create -output universal/certval \
+              target/aarch64-apple-darwin/release/certval target/x86_64-apple-darwin/release/certval
+            lipo -archs universal/certval
+            echo "path=universal/certval" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=target/${{ matrix.target }}/release/certval$exe" >> "$GITHUB_OUTPUT"
+          fi
       # A PKITS path validated by software, then by the platform's implementation alone (--only),
-      # so that a provider that fails to load or answer fails the build.
+      # so that a provider that fails to load or answer fails the build. On macOS this runs the
+      # runner's own slice of the universal binary.
       - name: Smoke test
         run: |
-          bin=target/${{ matrix.target }}/release/certval
+          bin=${{ steps.bin.outputs.path }}
           certs=rust-pki/certval/tests/examples/PKITS_data_2048/certs
           "$bin" --version
           "$bin" verify --list-stores
@@ -110,10 +145,8 @@ jobs:
         id: package
         run: |
           name=certval-cli-${{ steps.version.outputs.version }}-${{ matrix.target }}
-          exe=""
-          if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
           mkdir "$name"
-          cp target/${{ matrix.target }}/release/certval$exe "$name"/
+          cp ${{ steps.bin.outputs.path }} "$name"/
           cp README.md CHANGELOG.md LICENSE-APACHE LICENSE-MIT "$name"/
           if [ "${{ matrix.archive }}" = zip ]; then
             7z a "$name.zip" "$name" > /dev/null
@@ -127,7 +160,7 @@ jobs:
           path: ${{ steps.package.outputs.file }}
           if-no-files-found: error
 
-  release:
+  draft:
     needs: build
     if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
     runs-on: ubuntu-latest
@@ -147,11 +180,8 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Checksums
-        working-directory: dist
-        run: sha256sum certval-cli-* | tee SHA256SUMS
-      # A provenance attestation for each archive, checked with `gh attestation verify <file>
-      # --repo carl-wallace/certval-cli`: it ties the file to this workflow run and the tagged commit.
+      # A provenance attestation for each archive as built, which the signing scripts check with
+      # `gh attestation verify <file> --repo carl-wallace/certval-cli` before signing what is in it.
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: dist/certval-cli-*
@@ -161,7 +191,7 @@ jobs:
           version=${tag#certval-cli-v}
           sed -e "s/@VERSION@/$version/g" -e "s/@TAG@/$tag/g" .github/release/README.md > dist/README.md
           cat dist/README.md
-      - name: Publish
+      - name: Draft release
         run: |
           tag=${RELEASE_TAG:-$GITHUB_REF_NAME}
           version=${tag#certval-cli-v}
@@ -170,6 +200,7 @@ jobs:
           gh release create "$tag" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
+            --draft \
             --title "certval-cli $version" \
             --notes-file dist/README.md \
             $prerelease
