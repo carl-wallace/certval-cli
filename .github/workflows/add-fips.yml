@@ -60,12 +60,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - id: version
         run: echo "version=${RELEASE_TAG#certval-cli-v}" >> "$GITHUB_OUTPUT"
-      - name: The build holds AWS-LC's FIPS module and not its ordinary build
+      # aws-lc-rs takes its FIPS module for everything, rustls's TLS included, when its fips feature
+      # is on. The ordinary aws-lc-sys is compiled as well, because rustls asks for aws-lc-rs's
+      # default features, but with fips on nothing refers to it; so what is checked is the feature.
+      - name: The build uses AWS-LC's FIPS module
         run: |
           cargo tree --locked --no-default-features --features awslc-fips,openssl \
-            --prefix none --format '{p}' > deps.txt
-          grep -q '^aws-lc-fips-sys ' deps.txt
-          if grep '^aws-lc-sys ' deps.txt; then echo "the ordinary AWS-LC is in the FIPS build"; exit 1; fi
+            -e features -i aws-lc-rs > features.txt
+          grep -q 'aws-lc-rs feature "fips"' features.txt || { echo "aws-lc-rs is built without fips"; exit 1; }
+          cargo tree --locked --no-default-features --features awslc-fips,openssl \
+            --prefix none --format '{p}' | grep -q '^aws-lc-fips-sys '
       - run: cargo build --release --locked --bin certval --no-default-features --features awslc-fips,openssl
       # The runner's OpenSSL 3.0 with the 3.0.9 FIPS provider loaded, as certval-openssl's CI does,
       # so that the OpenSSL path is smoke-tested under FIPS.
@@ -148,9 +152,21 @@ jobs:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - id: version
         run: echo "version=${RELEASE_TAG#certval-cli-v}" >> "$GITHUB_OUTPUT"
-      - name: Cache the OpenSSL builds
+      # aws-lc-rs takes its FIPS module for everything, rustls's TLS included, when its fips feature
+      # is on. The ordinary aws-lc-sys is compiled as well, because rustls asks for aws-lc-rs's
+      # default features, but with fips on nothing refers to it; so what is checked is the feature.
+      - name: The build uses AWS-LC's FIPS module
+        run: |
+          cargo tree --locked --no-default-features --features awslc-fips,openssl,cryptokit --target aarch64-apple-darwin \
+            -e features -i aws-lc-rs > features.txt
+          grep -q 'aws-lc-rs feature "fips"' features.txt || { echo "aws-lc-rs is built without fips"; exit 1; }
+          cargo tree --locked --no-default-features --features awslc-fips,openssl,cryptokit --target aarch64-apple-darwin \
+            --prefix none --format '{p}' | grep -q '^aws-lc-fips-sys '
+      # Restored here and saved straight after the build, so that a later step's failure does not
+      # throw away four OpenSSL builds.
+      - name: Restore the OpenSSL builds
         id: openssl-cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: ~/ossl
           key: macos-openssl-${{ env.OPENSSL_VERSION }}-fips-${{ env.FIPS_VERSION }}-universal-v1
@@ -177,12 +193,12 @@ jobs:
                 --prefix="$HOME/ossl/fips-$arch" --libdir=lib > /dev/null \
               && make -j"$(sysctl -n hw.ncpu)" > /dev/null && make install_sw install_fips > /dev/null )
           done
-      - name: The build holds AWS-LC's FIPS module and not its ordinary build
-        run: |
-          cargo tree --locked --no-default-features --features awslc-fips,openssl,cryptokit \
-            --target aarch64-apple-darwin --prefix none --format '{p}' > deps.txt
-          grep -q '^aws-lc-fips-sys ' deps.txt
-          if grep '^aws-lc-sys ' deps.txt; then echo "the ordinary AWS-LC is in the FIPS build"; exit 1; fi
+      - name: Save the OpenSSL builds
+        if: steps.openssl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/ossl
+          key: macos-openssl-${{ env.OPENSSL_VERSION }}-fips-${{ env.FIPS_VERSION }}-universal-v1
       - name: Build
         run: |
           export AARCH64_APPLE_DARWIN_OPENSSL_DIR=$HOME/ossl/libs-arm64
@@ -289,12 +305,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - id: version
         run: echo "version=${RELEASE_TAG#certval-cli-v}" >> "$GITHUB_OUTPUT"
-      - name: The build holds AWS-LC's FIPS module and not its ordinary build
+      # aws-lc-rs takes its FIPS module for everything, rustls's TLS included, when its fips feature
+      # is on. The ordinary aws-lc-sys is compiled as well, because rustls asks for aws-lc-rs's
+      # default features, but with fips on nothing refers to it; so what is checked is the feature.
+      - name: The build uses AWS-LC's FIPS module
         run: |
           cargo tree --locked --no-default-features --features awslc-fips \
-            --prefix none --format '{p}' > deps.txt
-          grep -q '^aws-lc-fips-sys ' deps.txt
-          if grep '^aws-lc-sys ' deps.txt; then echo "the ordinary AWS-LC is in the FIPS build"; exit 1; fi
+            -e features -i aws-lc-rs > features.txt
+          grep -q 'aws-lc-rs feature "fips"' features.txt || { echo "aws-lc-rs is built without fips"; exit 1; }
+          cargo tree --locked --no-default-features --features awslc-fips \
+            --prefix none --format '{p}' | grep -q '^aws-lc-fips-sys '
       - run: cargo build --release --locked --bin certval --no-default-features --features awslc-fips
       - name: Assemble
         id: bundle
