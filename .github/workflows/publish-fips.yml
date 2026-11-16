@@ -1,8 +1,8 @@
 # Adds certval-fips to a published release, from the staging draft add-fips.yml made, once its
 # macOS and Windows archives hold signed binaries and libraries: checks the signatures, uploads the
 # archives to the release without replacing any file it already holds, adds their lines to its
-# SHA256SUMS, attests them, notes them in the release notes, and deletes the staging draft and its
-# tag. Run by hand:
+# SHA256SUMS, attests them, notes them in the release notes, and deletes the staging draft (a draft
+# has no git tag until it is published, so there is none to delete). Run by hand:
 #
 #   gh workflow run publish-fips.yml --repo carl-wallace/certval-cli -f release_tag=certval-cli-v<version>
 #
@@ -154,4 +154,4 @@ jobs:
           gh release upload "$RELEASE_TAG" dist/certval-cli-fips-* --repo "$GITHUB_REPOSITORY"
           gh release upload "$RELEASE_TAG" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
-          gh release delete "$STAGING_TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          gh release delete "$STAGING_TAG" --repo "$GITHUB_REPOSITORY" --yes
