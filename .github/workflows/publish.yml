@@ -69,8 +69,10 @@ jobs:
             echo "$info" | grep -q "flags=.*runtime"
             echo "$info" | grep -q "^Timestamp="
             # Gatekeeper's own verdict, which for a notarized binary names the notarization. A bare
-            # binary cannot carry a stapled ticket, so this asks Apple, as Gatekeeper would.
-            spctl --assess --type execute --verbose=2 "$bin" 2>&1 | tee spctl.txt
+            # binary cannot carry a stapled ticket, so this asks Apple, as Gatekeeper would. It is
+            # assessed as a file to open: --type execute assesses only app bundles, and rejects a
+            # command line binary however it is signed.
+            spctl --assess --type open --context context:primary-signature --verbose=2 "$bin" 2>&1 | tee spctl.txt
             grep -q "source=Notarized Developer ID" spctl.txt
           done
 
