@@ -52,6 +52,8 @@ enum Command {
     /// List the keys the keychain, the certificate store or a PKCS #11 token holds
     #[command(subcommand)]
     Cred(cred::Command),
+    /// List the --crypto implementations this build offers
+    ListCrypto,
     /// Issue certificates, sign CRLs and answer OCSP requests with a CA's key
     #[command(subcommand)]
     Ca(ca::Command),
@@ -99,6 +101,7 @@ async fn run(cli: Cli) -> ExitCode {
         Command::Ocsp(args) => ocsp::run(&args).await.map(|()| true),
         Command::Cms(command) => cms::run(&command),
         Command::Cred(command) => cred::run(&command),
+        Command::ListCrypto => crypto::list(),
         Command::Ca(command) => ca::run(&command),
         Command::Req(args) => req::run(&args),
     };
