@@ -205,7 +205,12 @@ side of enveloping are software's. The three flags can be given as `CERTVAL_PKCS
 `CERTVAL_PKCS11_TOKEN_LABEL` and `CERTVAL_PKCS11_USER_PIN`, which keeps the PIN off the command
 line.
 
-Which of these are built in depends on the crate's [features](#crate-feature-flags).
+Which of these are built in depends on the crate's [features](#crate-feature-flags). `certval
+list-crypto` lists the ones a build offers:
+
+```sh
+certval list-crypto
+```
 
 ### Keys an implementation holds
 

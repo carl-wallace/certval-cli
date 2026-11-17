@@ -88,6 +88,36 @@ impl Pkcs11Args {
     }
 }
 
+/// `list-crypto`: prints each --crypto choice this build offers, with what performs it. The
+/// choices follow the platform and the crate's features, as the Crypto variants do.
+pub fn list() -> Result<bool> {
+    use clap::ValueEnum;
+    for crypto in Crypto::value_variants() {
+        let Some(value) = crypto.to_possible_value() else {
+            continue;
+        };
+        let help = value
+            .get_help()
+            .map(ToString::to_string)
+            .unwrap_or_default();
+        println!("{:<20}{help}{}", value.get_name(), crypto.build_note());
+    }
+    Ok(true)
+}
+
+impl Crypto {
+    /// What a feature adds to the implementation, for list-crypto.
+    fn build_note(self) -> &'static str {
+        match self {
+            #[cfg(feature = "awslc-fips")]
+            Crypto::AwsLc => " (FIPS module)",
+            #[cfg(all(target_os = "macos", feature = "cryptokit"))]
+            Crypto::SecurityFramework => ", with CryptoKit for ML-KEM and ML-DSA",
+            _ => "",
+        }
+    }
+}
+
 impl CryptoArgs {
     /// Whether software is registered: as the choice, or behind it.
     fn software(&self) -> bool {

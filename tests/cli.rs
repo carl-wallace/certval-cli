@@ -276,3 +276,21 @@ fn ocsp_describes_a_saved_response() {
     assert!(out.contains("status       good"), "{out}");
     assert!(out.contains("not verified"), "{out}");
 }
+
+#[test]
+fn list_crypto_lists_the_implementations_built_in() {
+    let (code, out, _) = certval(&["list-crypto"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("software"), "{out}");
+    assert!(out.contains("aws-lc"), "{out}");
+    assert!(out.contains("pkcs11"), "{out}");
+    #[cfg(target_os = "macos")]
+    assert!(out.contains("security-framework"), "{out}");
+    #[cfg(windows)]
+    assert!(out.contains("cng"), "{out}");
+    assert_eq!(
+        out.contains("openssl"),
+        cfg!(all(feature = "openssl", not(windows))),
+        "{out}"
+    );
+}
