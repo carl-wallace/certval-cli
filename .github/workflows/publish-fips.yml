@@ -1,8 +1,9 @@
 # Adds certval-fips to a published release, from the staging draft add-fips.yml made, once its
 # macOS and Windows archives hold signed binaries and libraries: checks the signatures, uploads the
-# archives to the release without replacing any file it already holds, adds their lines to its
-# SHA256SUMS, attests them, notes them in the release notes, and deletes the staging draft (a draft
-# has no git tag until it is published, so there is none to delete). Run by hand:
+# archives and FIPS-BUILT-SHA256SUMS (add-fips.yml's list of them as built) to the release without
+# replacing any file it already holds, adds the archives' lines to its SHA256SUMS, attests them,
+# notes them in the release notes, and deletes the staging draft (a draft has no git tag until it is
+# published, so there is none to delete). Run by hand:
 #
 #   gh workflow run publish-fips.yml --repo carl-wallace/certval-cli -f release_tag=certval-cli-v<version>
 #
@@ -129,13 +130,14 @@ jobs:
       - name: Download
         run: |
           gh release download "$STAGING_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'certval-cli-fips-*' --dir dist
+          gh release download "$STAGING_TAG" --repo "$GITHUB_REPOSITORY" --pattern FIPS-BUILT-SHA256SUMS --dir built
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --dir old
       # The release's SHA256SUMS with the new archives' lines added; its existing lines unchanged.
       - name: Checksums
         run: |
           (cat old/SHA256SUMS; cd dist && sha256sum certval-cli-fips-*) > SHA256SUMS
           cat SHA256SUMS
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-path: dist/certval-cli-fips-*
       - name: Notes
@@ -146,12 +148,12 @@ jobs:
 
           ## certval-fips
 
-          certval-cli-fips-* holds certval-fips, the certval command built with FIPS-validated cryptographic modules, added on $(date -u +%Y-%m-%d) from this release's tag: AWS-LC's FIPS module (--crypto aws-lc) on every platform, and OpenSSL's FIPS provider (--crypto openssl) bundled on macOS and through the system's OpenSSL on Linux. Each archive's FIPS.md says how to use it; on macOS, run fips-setup.sh once before using OpenSSL's FIPS provider. The macOS and Windows binaries and libraries are $signed. The modules are validated; this build of certval is not itself a validated module.
+          certval-cli-fips-* holds certval-fips, the certval command built with FIPS-validated cryptographic modules, added on $(date -u +%Y-%m-%d) from this release's tag: AWS-LC's FIPS module (--crypto aws-lc) on every platform, and OpenSSL's FIPS provider (--crypto openssl) bundled on macOS and through the system's OpenSSL on Linux. Each archive's FIPS.md says how to use it; on macOS, run fips-setup.sh once before using OpenSSL's FIPS provider. The macOS and Windows binaries and libraries are $signed. The modules are validated; this build of certval is not itself a validated module. FIPS-BUILT-SHA256SUMS lists these archives as add-fips.yml built them, before signing; it and they carry add-fips.yml's build provenance attestation.
           EOF
       - name: Add to the release
         run: |
           # Without --clobber, an upload of a name the release already holds fails.
-          gh release upload "$RELEASE_TAG" dist/certval-cli-fips-* --repo "$GITHUB_REPOSITORY"
+          gh release upload "$RELEASE_TAG" dist/certval-cli-fips-* built/FIPS-BUILT-SHA256SUMS --repo "$GITHUB_REPOSITORY"
           gh release upload "$RELEASE_TAG" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
           gh release delete "$STAGING_TAG" --repo "$GITHUB_REPOSITORY" --yes
