@@ -3,7 +3,13 @@
 # to be signed; publish-fips.yml then adds it to that release. The release's own files are not
 # touched: this only adds to them. Run by hand:
 #
-#   gh workflow run add-fips.yml --repo carl-wallace/certval-cli -f release_tag=certval-cli-v<version>
+#   gh workflow run add-fips.yml --repo carl-wallace/certval-cli --ref certval-cli-v<version> \
+#     -f release_tag=certval-cli-v<version>
+#
+# Run from the release's tag (--ref), so that the archives' provenance names the tag and its commit,
+# not the branch the run was started from; the signing scripts refuse an archive whose provenance
+# does not name the tag. FIPS-BUILT-SHA256SUMS, attested with the archives, lists them as built,
+# before signing replaces the macOS and Windows ones; publish-fips.yml adds it to the release.
 #
 # The staging draft's tag is <release_tag>-fips-staging, made at the release tag's commit; it is
 # deleted when publish-fips.yml has moved its files into the release.
@@ -38,26 +44,29 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.release_tag }}
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: carl-wallace/rust-pki
           ref: 93104f49a8083f1e527e3b4e830581b917674e2f
           path: rust-pki
           sparse-checkout: certval/tests/examples/PKITS_data_2048
-      # The FIPS READMEs and setup script are this workflow's, not the release tag's, which
-      # predates them.
-      - uses: actions/checkout@v7
+      # The FIPS READMEs and setup script are this workflow's: the release tag's when the run is
+      # started from it, and main's for a tag that predates them.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: support
           sparse-checkout: .github/release
       - run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config cmake
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: "1.24"
-      - uses: dtolnay/rust-toolchain@stable
+      # The version release.yml builds with; see there.
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: 1.100.0
       - id: version
         run: echo "version=${RELEASE_TAG#certval-cli-v}" >> "$GITHUB_OUTPUT"
       # aws-lc-rs takes its FIPS module for everything, rustls's TLS included, when its fips feature
@@ -119,7 +128,7 @@ jobs:
           cp README.md CHANGELOG.md LICENSE-APACHE LICENSE-MIT "$name"/
           cp support/.github/release/FIPS-linux.md "$name/FIPS.md"
           tar czf "$name.tar.gz" "$name"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fips-linux
           path: certval-cli-fips-*.tar.gz
@@ -129,26 +138,28 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.release_tag }}
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: carl-wallace/rust-pki
           ref: 93104f49a8083f1e527e3b4e830581b917674e2f
           path: rust-pki
           sparse-checkout: certval/tests/examples/PKITS_data_2048
-      # The FIPS READMEs and setup script are this workflow's, not the release tag's, which
-      # predates them.
-      - uses: actions/checkout@v7
+      # The FIPS READMEs and setup script are this workflow's: the release tag's when the run is
+      # started from it, and main's for a tag that predates them.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: support
           sparse-checkout: .github/release
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: "1.24"
-      - uses: dtolnay/rust-toolchain@stable
+      # The version release.yml builds with; see there.
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
+          toolchain: 1.100.0
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - id: version
         run: echo "version=${RELEASE_TAG#certval-cli-v}" >> "$GITHUB_OUTPUT"
@@ -166,7 +177,7 @@ jobs:
       # throw away four OpenSSL builds.
       - name: Restore the OpenSSL builds
         id: openssl-cache
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/ossl
           key: macos-openssl-${{ env.OPENSSL_VERSION }}-fips-${{ env.FIPS_VERSION }}-universal-v1
@@ -195,7 +206,7 @@ jobs:
           done
       - name: Save the OpenSSL builds
         if: steps.openssl-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/ossl
           key: macos-openssl-${{ env.OPENSSL_VERSION }}-fips-${{ env.FIPS_VERSION }}-universal-v1
@@ -269,7 +280,7 @@ jobs:
           if verify openssl | grep -q "path 0: Valid"; then echo "validated without the FIPS provider"; exit 1; fi
       - name: Package
         run: tar czf "${{ steps.bundle.outputs.dir }}.tar.gz" "${{ steps.bundle.outputs.dir }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fips-macos
           path: certval-cli-fips-*.tar.gz
@@ -282,28 +293,31 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.release_tag }}
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: carl-wallace/rust-pki
           ref: 93104f49a8083f1e527e3b4e830581b917674e2f
           path: rust-pki
           sparse-checkout: certval/tests/examples/PKITS_data_2048
-      # The FIPS READMEs and setup script are this workflow's, not the release tag's, which
-      # predates them.
-      - uses: actions/checkout@v7
+      # The FIPS READMEs and setup script are this workflow's: the release tag's when the run is
+      # started from it, and main's for a tag that predates them.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: support
           sparse-checkout: .github/release
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: "1.24"
       # AWS-LC's FIPS build on Windows assembles with NASM and builds with CMake's Ninja generator.
       - run: choco install -y nasm ninja
       - run: echo "C:/Program Files/NASM" >> "$GITHUB_PATH"
-      - uses: dtolnay/rust-toolchain@stable
+      # The version release.yml builds with; see there.
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: 1.100.0
       - id: version
         run: echo "version=${RELEASE_TAG#certval-cli-v}" >> "$GITHUB_OUTPUT"
       # aws-lc-rs takes its FIPS module for everything, rustls's TLS included, when its fips feature
@@ -339,7 +353,7 @@ jobs:
           grep -q "path 0: Valid" smoke.txt
       - name: Package
         run: 7z a "${{ steps.bundle.outputs.dir }}.zip" "${{ steps.bundle.outputs.dir }}" > /dev/null
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fips-windows
           path: certval-cli-fips-*.zip
@@ -356,15 +370,20 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
       # As release.yml does: the archives as built, which is checked before what is in them is
-      # signed.
-      - uses: actions/attest-build-provenance@v2
+      # signed, and FIPS-BUILT-SHA256SUMS listing them, which publish-fips.yml adds to the release.
+      - name: Built checksums
+        working-directory: dist
+        run: sha256sum certval-cli-fips-* | tee FIPS-BUILT-SHA256SUMS
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
-          subject-path: dist/certval-cli-fips-*
+          subject-path: |
+            dist/certval-cli-fips-*
+            dist/FIPS-BUILT-SHA256SUMS
       - name: Staging draft
         run: |
           draft=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
