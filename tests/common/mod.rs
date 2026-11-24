@@ -25,6 +25,8 @@ pub enum Case {
     MlDsaVerification,
     /// Signing with ECDSA on P-256 with SHA-512, which the key performs
     P256Sha512,
+    /// Encrypting under a given key, for EncryptedData
+    GivenKeyEncryption,
 }
 
 impl Case {
@@ -57,15 +59,21 @@ pub fn cryptos() -> Vec<Choice> {
     }
     cryptos.push(Choice {
         name: "aws-lc",
-        // aws-lc-rs signs ECDSA only with the hash that matches the curve.
-        declines: &[Case::MlDsaSigning, Case::P256Sha512],
+        // aws-lc-rs signs ECDSA only with the hash that matches the curve. certval-awslc encrypts
+        // only under a key it generates.
+        declines: &[
+            Case::MlDsaSigning,
+            Case::P256Sha512,
+            Case::GivenKeyEncryption,
+        ],
     });
     if cfg!(all(target_os = "macos", feature = "cryptokit")) {
         cryptos.push(Choice {
             name: "security-framework",
             // CommonCrypto has no GCM. The ML-KEM and ML-DSA cases use ML-KEM-768 and ML-DSA-65,
-            // which CryptoKit offers.
-            declines: &[Case::Gcm],
+            // which CryptoKit offers. certval-security-framework encrypts only under a key it
+            // generates.
+            declines: &[Case::Gcm, Case::GivenKeyEncryption],
         });
     } else if cfg!(target_os = "macos") {
         cryptos.push(Choice {
@@ -74,6 +82,7 @@ pub fn cryptos() -> Vec<Choice> {
             // feature brings in.
             declines: &[
                 Case::Gcm,
+                Case::GivenKeyEncryption,
                 Case::KemEncryption,
                 Case::KemDecryption,
                 Case::MlDsaSigning,
@@ -86,8 +95,8 @@ pub fn cryptos() -> Vec<Choice> {
             name: "cng",
             // certval-cng performs the X9.63 KDF itself, and ML-KEM and ML-DSA through CNG, which
             // has them from Windows 11 24H2 with the post-quantum update; on an older Windows the
-            // ML-KEM and ML-DSA cases fail here.
-            declines: &[],
+            // ML-KEM and ML-DSA cases fail here. It encrypts only under a key it generates.
+            declines: &[Case::GivenKeyEncryption],
         });
     }
     cryptos

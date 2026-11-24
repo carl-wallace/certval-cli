@@ -83,6 +83,8 @@ cryptography](#choosing-the-cryptography).
 ```sh
 certval cms encrypt --recip alice.crt --recip bob.crt --in message.txt --out message.der
 certval cms decrypt --in message.der --cert alice.crt --key alice.key --out message.txt
+certval cms encrypt --secret-key 000102030405060708090a0b0c0d0e0f --content aes128-cbc --in message.txt --out encrypted.der
+certval cms decrypt --secret-key 000102030405060708090a0b0c0d0e0f --in encrypted.der --out message.txt
 certval cms sign --in message.txt --cert signer.crt --key signer.key --out signed.der
 certval cms verify --in signed.der --anchor ca.crt --out message.txt
 ```
@@ -99,6 +101,12 @@ and a KEM for an ML-KEM key (`--kdf`, `--wrap` and `--ukm`). `decrypt` takes the
 certificate and its PKCS #8 private key, or without them, a key the `--crypto` implementation
 holds for a recipient the message names (see [Keys an implementation
 holds](#keys-an-implementation-holds)).
+
+With `--secret-key`, `encrypt` makes an EncryptedData under that key, as hex, which the parties
+already share, rather than a message to recipients, and `decrypt --secret-key` decrypts one.
+EncryptedData does not authenticate, so `--content` is a CBC algorithm (AES-256-CBC by default).
+The key is given on the command line, as with `openssl cms -secretkey`, so it is visible to other
+users of the machine while the command runs.
 
 `sign` signs with the PKCS #8 key for `--cert`, or without `--key`, with a key the `--crypto`
 implementation holds, for `--cert`, `--email` or `--skid`. It signs with `--digest`, and `--pss`

@@ -9,19 +9,20 @@
 //! `--email` or `--skid` to sign.
 
 use certval_cms::{
-    rsa_pss, AuthEnvelopedDataBuilder, CmsEnvironment, ContentEncryptionAlgorithm, DigestAlgorithm,
-    EnvelopedDataBuilder, IncludeCertificates, KdfAlgorithm, KemRecipient, KeyAgreeRecipient,
-    KeyAgreementAlgorithm, KeyTransRecipient, KeyTransportAlgorithm, KeyWrapAlgorithm,
-    SharedSigningCredential, SignedDataBuilder, Signer, SignerPolicy, SigningCredential,
-    SigningCredentialLookup, Vetting,
+    content_info, rsa_pss, AuthEnvelopedDataBuilder, CmsEnvironment, ContentEncryptionAlgorithm,
+    DigestAlgorithm, EncryptedDataBuilder, IncludeCertificates, KdfAlgorithm, KemRecipient,
+    KeyAgreeRecipient, KeyAgreementAlgorithm, KeyTransRecipient, KeyTransportAlgorithm,
+    KeyWrapAlgorithm, SharedSigningCredential, SignedDataBuilder, Signer, SignerPolicy,
+    SigningCredential, SigningCredentialLookup, Vetting,
 };
 use clap::ValueEnum;
+use cms::builder::{EnvelopedDataBuilder, RecipientInfoBuilder};
 use cms::cert::IssuerAndSerialNumber;
 use cms::content_info::ContentInfo;
 use cms::enveloped_data::RecipientIdentifier;
 use cms::signed_data::SignerIdentifier;
 use const_oid::db::fips203::{ID_ALG_ML_KEM_1024, ID_ALG_ML_KEM_512, ID_ALG_ML_KEM_768};
-use const_oid::db::rfc5911::ID_DATA;
+use const_oid::db::rfc5911::{ID_DATA, ID_ENVELOPED_DATA};
 use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION};
 use der::asn1::OctetString;
 use der::{Decode, Encode};
@@ -38,9 +39,10 @@ use crate::Result;
 
 #[derive(clap::Subcommand)]
 pub enum Command {
-    /// Encrypt a file to one or more recipients' certificates
+    /// Encrypt a file to one or more recipients' certificates, or under a secret key
     Encrypt(EncryptArgs),
-    /// Decrypt an EnvelopedData or AuthEnvelopedData with a recipient's key
+    /// Decrypt an EnvelopedData or AuthEnvelopedData with a recipient's key, or an EncryptedData
+    /// with a secret key
     Decrypt(DecryptArgs),
     /// Sign a file
     Sign(SignArgs),
@@ -188,8 +190,17 @@ pub enum Policy {
 pub struct EncryptArgs {
     /// Recipient certificate, DER or PEM; repeatable. Its key decides the recipient type: key
     /// transport for RSA, key agreement for EC, a KEM for ML-KEM
-    #[arg(long = "recip", value_name = "FILE", required = true)]
+    #[arg(
+        long = "recip",
+        value_name = "FILE",
+        required_unless_present = "secret_key"
+    )]
     pub recipients: Vec<String>,
+
+    /// Write an EncryptedData under this key, as hex, which the parties already share, rather
+    /// than an EnvelopedData or AuthEnvelopedData to recipients
+    #[arg(long, value_name = "HEX", conflicts_with_all = ["recipients", "ukm"])]
+    pub secret_key: Option<String>,
 
     /// File to encrypt
     #[arg(long = "in", value_name = "FILE")]
@@ -199,9 +210,10 @@ pub struct EncryptArgs {
     #[arg(long, value_name = "FILE")]
     pub out: String,
 
-    /// Content encryption algorithm
-    #[arg(long, value_enum, default_value_t = Content::Aes256Gcm)]
-    pub content: Content,
+    /// Content encryption algorithm; aes256-gcm by default, or aes256-cbc with --secret-key, as
+    /// EncryptedData does not authenticate
+    #[arg(long, value_enum)]
+    pub content: Option<Content>,
 
     /// Key transport algorithm, for an RSA recipient
     #[arg(long, value_enum, default_value_t = KeyTransport::OaepSha256)]
@@ -229,71 +241,86 @@ pub struct EncryptArgs {
 
 type Rng = UnwrapErr<SysRng>;
 
-/// Adds a recipient for each certificate to an EnvelopedData or AuthEnvelopedData builder, of the
-/// type the certificate's key calls for.
-macro_rules! add_recipients {
-    ($builder:expr, $env:expr, $certs:expr, $args:expr, $ukm:expr) => {
-        for (file, cert) in $certs {
-            match cert
-                .tbs_certificate()
-                .subject_public_key_info()
-                .algorithm
-                .oid
-            {
-                RSA_ENCRYPTION => $builder.add_recipient(KeyTransRecipient::from_certificate(
-                    $env,
-                    cert,
+/// A recipient for each certificate, of the type the certificate's key calls for, with its
+/// cryptography going through `env`.
+fn recipients<'e>(
+    env: &'e CmsEnvironment,
+    args: &EncryptArgs,
+    ukm: Option<Vec<u8>>,
+) -> Result<Vec<Box<dyn RecipientInfoBuilder<Rng = Rng> + 'e>>> {
+    let mut recipients: Vec<Box<dyn RecipientInfoBuilder<Rng = Rng> + 'e>> = vec![];
+    for file in &args.recipients {
+        let cert = read_certificate(file)?;
+        match cert
+            .tbs_certificate()
+            .subject_public_key_info()
+            .algorithm
+            .oid
+        {
+            RSA_ENCRYPTION => recipients.push(Box::new(KeyTransRecipient::from_certificate(
+                env,
+                &cert,
+                None,
+                args.key_transport.into(),
+            )?)),
+            ID_EC_PUBLIC_KEY => recipients.push(Box::new(KeyAgreeRecipient::from_certificate(
+                env,
+                &cert,
+                None,
+                args.kdf.key_agreement(),
+                args.wrap.into(),
+                ukm.clone(),
+            )?)),
+            ID_ALG_ML_KEM_512 | ID_ALG_ML_KEM_768 | ID_ALG_ML_KEM_1024 => {
+                recipients.push(Box::new(KemRecipient::from_certificate(
+                    env,
+                    &cert,
                     None,
-                    $args.key_transport.into(),
-                )?),
-                ID_EC_PUBLIC_KEY => $builder.add_recipient(KeyAgreeRecipient::from_certificate(
-                    $env,
-                    cert,
-                    None,
-                    $args.kdf.key_agreement(),
-                    $args.wrap.into(),
-                    $ukm.clone(),
-                )?),
-                ID_ALG_ML_KEM_512 | ID_ALG_ML_KEM_768 | ID_ALG_ML_KEM_1024 => $builder
-                    .add_recipient(KemRecipient::from_certificate(
-                        $env,
-                        cert,
-                        None,
-                        $args.kdf.kdf(),
-                        $args.wrap.into(),
-                        $ukm.clone(),
-                    )?),
-                oid => {
-                    return Err(format!(
-                        "{file}: no recipient type for a {} key",
-                        display::oid(&oid)
-                    )
-                    .into())
-                }
-            };
+                    args.kdf.kdf(),
+                    args.wrap.into(),
+                    ukm.clone(),
+                )?))
+            }
+            oid => {
+                return Err(
+                    format!("{file}: no recipient type for a {} key", display::oid(&oid)).into(),
+                )
+            }
         }
-    };
+    }
+    Ok(recipients)
 }
 
 fn encrypt(args: &EncryptArgs) -> Result<bool> {
     let content = std::fs::read(&args.input).map_err(|e| format!("{}: {e}", args.input))?;
     let env = args.crypto.cms_environment(args.crypto.pki_environment()?);
-    let certs = args
-        .recipients
-        .iter()
-        .map(|file| Ok((file, read_certificate(file)?)))
-        .collect::<Result<Vec<_>>>()?;
-    let ukm = args.ukm.as_deref().map(from_hex).transpose()?;
-    let alg = ContentEncryptionAlgorithm::from(args.content);
     let mut rng: Rng = UnwrapErr(SysRng);
-    let content_info = if alg.is_authenticated() {
-        let mut builder = AuthEnvelopedDataBuilder::new(&content, alg)?;
-        add_recipients!(builder, &env, &certs, args, ukm);
-        builder.build_content_info(&env, &mut rng)?
-    } else {
-        let mut builder = EnvelopedDataBuilder::new(&content, alg)?;
-        add_recipients!(builder, &env, &certs, args, ukm);
-        builder.build_content_info(&env, &mut rng)?
+    let content_info = match &args.secret_key {
+        Some(key) => {
+            let key = secret_key(key)?;
+            let alg = args.content.unwrap_or(Content::Aes256Cbc).into();
+            EncryptedDataBuilder::new(&content, &key, env.content_encryptor(alg))
+                .build_content_info(&mut rng)?
+        }
+        None => {
+            let ukm = args.ukm.as_deref().map(from_hex).transpose()?;
+            let recipients = recipients(&env, args, ukm)?;
+            let alg: ContentEncryptionAlgorithm = args.content.unwrap_or(Content::Aes256Gcm).into();
+            let encryptor = env.content_encryptor(alg);
+            if alg.is_authenticated() {
+                let mut builder = AuthEnvelopedDataBuilder::new(&content, encryptor);
+                for recipient in recipients {
+                    builder.add_recipient(recipient);
+                }
+                builder.build_content_info(&mut rng)?
+            } else {
+                let mut builder = EnvelopedDataBuilder::new(None, &content, encryptor, None)?;
+                for recipient in recipients {
+                    builder.add_recipient_info(recipient)?;
+                }
+                content_info(ID_ENVELOPED_DATA, &builder.build_with_rng(&mut rng)?)?
+            }
+        }
     };
     write_message(&args.out, &content_info, args.outform)?;
     Ok(true)
@@ -316,6 +343,10 @@ pub struct DecryptArgs {
     #[arg(long, value_name = "FILE", requires = "cert")]
     pub key: Option<String>,
 
+    /// Decrypt an EncryptedData with this key, as hex, which the parties share
+    #[arg(long, value_name = "HEX", conflicts_with_all = ["cert", "key"])]
+    pub secret_key: Option<String>,
+
     /// File to write the content to; standard output when absent
     #[arg(long, value_name = "FILE")]
     pub out: Option<String>,
@@ -327,6 +358,15 @@ pub struct DecryptArgs {
 fn decrypt(args: &DecryptArgs) -> Result<bool> {
     let content_info = read_message(&args.input)?;
     let mut env = args.crypto.cms_environment(args.crypto.pki_environment()?);
+    if let Some(key) = &args.secret_key {
+        let (content_type, content) =
+            env.decrypt_encrypted_data(&content_info, &secret_key(key)?)?;
+        if content_type != ID_DATA {
+            eprintln!("the content is of type {}", display::oid(&content_type));
+        }
+        write_content(args.out.as_deref(), &content)?;
+        return Ok(true);
+    }
     let decrypted = match (&args.cert, &args.key) {
         (Some(cert), Some(key)) => {
             let credential = args
@@ -708,6 +748,11 @@ fn write_content(file: Option<&str>, content: &[u8]) -> Result<()> {
 }
 
 /// Bytes from hex digits, which may be separated by colons, as `display::hex` writes them.
+/// A `--secret-key`, as hex. Unlike [`from_hex`], an error does not repeat the input.
+fn secret_key(hex: &str) -> Result<Vec<u8>> {
+    from_hex(hex).map_err(|_| "--secret-key: not an even number of hex digits".into())
+}
+
 pub(crate) fn from_hex(hex: &str) -> Result<Vec<u8>> {
     let hex = &hex.replace(':', "");
     if !hex.len().is_multiple_of(2) {

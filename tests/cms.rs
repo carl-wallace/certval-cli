@@ -1,8 +1,9 @@
 //! `certval cms` against `openssl cms`, in both directions: what openssl encrypts or signs, certval
-//! decrypts or verifies, and the reverse. Each runs once per `--crypto` choice the binary offers,
-//! with `--only`, so every operation reaches that implementation. A case a choice declines is run
-//! with `--only` to see it fail, then without, so that software answers it, unless the key
-//! performs it: a key is the chosen implementation's either way, so that case is not run further.
+//! decrypts or verifies, and the reverse, for EnvelopedData, AuthEnvelopedData, EncryptedData and
+//! SignedData. Each runs once per `--crypto` choice the binary offers, with `--only`, so every
+//! operation reaches that implementation. A case a choice declines is run with `--only` to see it
+//! fail, then without, so that software answers it, unless the key performs it: a key is the chosen
+//! implementation's either way, so that case is not run further.
 //!
 //! `CERTVAL_CMS_OPENSSL` names the `openssl` command; when it is unset each test says so and passes.
 //! It makes a CA and RSA, EC, ML-KEM and ML-DSA keys with certificates from it, in a directory of
@@ -257,6 +258,105 @@ fn certval_encrypts_and_openssl_decrypts() {
                 );
                 assert_eq!(decrypted, MESSAGE, "{key} {content} {}", crypto.name);
             }
+        }
+    }
+}
+
+/// EncryptedData under a shared key, both ways: what certval encrypts with `--secret-key`, openssl
+/// decrypts with `-EncryptedData_decrypt`, and what openssl encrypts with `-EncryptedData_encrypt`,
+/// certval decrypts. Every choice decrypts; a choice whose content encryption only generates its
+/// own keys declines to encrypt with --only.
+#[test]
+fn certval_and_openssl_exchange_encrypted_data() {
+    const TEST: &str = "certval_and_openssl_exchange_encrypted_data";
+    let Some(openssl) = OpenSsl::from_env(TEST) else {
+        return;
+    };
+    let pki = Pki::new(&openssl, TEST);
+    for (content, openssl_content, key) in [
+        (
+            "aes128-cbc",
+            "-aes-128-cbc",
+            "000102030405060708090a0b0c0d0e0f",
+        ),
+        (
+            "aes256-cbc",
+            "-aes-256-cbc",
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        ),
+    ] {
+        for crypto in cryptos() {
+            certval_with(
+                &pki.dir,
+                &[
+                    "cms",
+                    "encrypt",
+                    "--in",
+                    "message.txt",
+                    "--out",
+                    "encrypted.der",
+                    "--content",
+                    content,
+                    "--secret-key",
+                    key,
+                ],
+                &crypto,
+                &[Case::GivenKeyEncryption],
+            );
+            let decrypted = openssl.run(
+                &pki.dir,
+                &[
+                    "cms",
+                    "-EncryptedData_decrypt",
+                    "-binary",
+                    "-inform",
+                    "DER",
+                    "-in",
+                    "encrypted.der",
+                    "-secretkey",
+                    key,
+                ],
+            );
+            assert_eq!(decrypted, MESSAGE, "{content} {}", crypto.name);
+        }
+
+        openssl.run(
+            &pki.dir,
+            &[
+                "cms",
+                "-EncryptedData_encrypt",
+                "-binary",
+                openssl_content,
+                "-secretkey",
+                key,
+                "-in",
+                "message.txt",
+                "-outform",
+                "DER",
+                "-out",
+                "encrypted.der",
+            ],
+        );
+        for crypto in cryptos() {
+            let decrypted = certval_with(
+                &pki.dir,
+                &[
+                    "cms",
+                    "decrypt",
+                    "--in",
+                    "encrypted.der",
+                    "--secret-key",
+                    key,
+                ],
+                &crypto,
+                &[],
+            );
+            assert_eq!(
+                decrypted.as_deref(),
+                Some(MESSAGE),
+                "{content} {}",
+                crypto.name
+            );
         }
     }
 }
