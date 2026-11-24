@@ -308,15 +308,19 @@ dependencies = [
 [[package]]
 name = "certval-awslc"
 version = "0.1.0-rc.1"
-source = "git+https://github.com/carl-wallace/certval-awslc?branch=pluggable_content_encryption#ca04c883bc9e0452e337aecd74ea80756a9b3102"
+source = "git+https://github.com/carl-wallace/certval-awslc?branch=pluggable_content_encryption#608283f10d3f07c417746ec3830bb2f628a049d2"
 dependencies = [
  "aws-lc-rs",
  "certval",
  "certval-cms",
+ "cms",
  "const-oid",
  "der",
+ "kdf",
  "log",
  "pkcs8",
+ "rsa",
+ "sha2",
  "spki",
  "x509-cert",
  "zeroize",
@@ -395,15 +399,18 @@ dependencies = [
 [[package]]
 name = "certval-cng"
 version = "0.1.0-rc.1"
-source = "git+https://github.com/carl-wallace/certval-cng?branch=pluggable_content_encryption#fb42682ed486e25c27e735fd97faeaa2b1361c16"
+source = "git+https://github.com/carl-wallace/certval-cng?branch=pluggable_content_encryption#f112324ae015afbf39f2248721faf88558a68ffe"
 dependencies = [
  "certval",
  "certval-cms",
  "cms",
  "const-oid",
  "der",
+ "kdf",
  "log",
  "pkcs8",
+ "rsa",
+ "sha2",
  "spki",
  "windows-sys 0.61.2",
  "x509-cert",
@@ -413,16 +420,18 @@ dependencies = [
 [[package]]
 name = "certval-openssl"
 version = "0.1.0-rc.1"
-source = "git+https://github.com/carl-wallace/certval-openssl?branch=pluggable_content_encryption#7ec83ed7da1f891e98007cc70d008ba1ee6d2130"
+source = "git+https://github.com/carl-wallace/certval-openssl?branch=pluggable_content_encryption#6adae497811b54bb6d4739ad7435af8bf314156d"
 dependencies = [
  "certval",
  "certval-cms",
+ "cms",
  "const-oid",
  "der",
  "foreign-types",
  "log",
  "openssl",
  "openssl-sys",
+ "rsa",
  "spki",
  "x509-cert",
  "zeroize",
@@ -450,7 +459,7 @@ dependencies = [
 [[package]]
 name = "certval-security-framework"
 version = "0.1.0-rc.1"
-source = "git+https://github.com/carl-wallace/certval-security-framework?branch=pluggable_content_encryption#a8a660a9790cf9080faa0b18a14b1570e93aa4b5"
+source = "git+https://github.com/carl-wallace/certval-security-framework?branch=pluggable_content_encryption#299ead3eab6f21a2cb74222d8d9f36c7adb2e081"
 dependencies = [
  "certval",
  "certval-cms",
@@ -460,6 +469,7 @@ dependencies = [
  "der",
  "log",
  "pkcs8",
+ "rsa",
  "sec1",
  "security-framework",
  "security-framework-sys",
