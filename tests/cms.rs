@@ -264,8 +264,7 @@ fn certval_encrypts_and_openssl_decrypts() {
 
 /// EncryptedData under a shared key, both ways: what certval encrypts with `--secret-key`, openssl
 /// decrypts with `-EncryptedData_decrypt`, and what openssl encrypts with `-EncryptedData_encrypt`,
-/// certval decrypts. Every choice decrypts; a choice whose content encryption only generates its
-/// own keys declines to encrypt with --only.
+/// certval decrypts, each with --only, so every choice both encrypts and decrypts.
 #[test]
 fn certval_and_openssl_exchange_encrypted_data() {
     const TEST: &str = "certval_and_openssl_exchange_encrypted_data";
@@ -301,7 +300,7 @@ fn certval_and_openssl_exchange_encrypted_data() {
                     key,
                 ],
                 &crypto,
-                &[Case::GivenKeyEncryption],
+                &[],
             );
             let decrypted = openssl.run(
                 &pki.dir,

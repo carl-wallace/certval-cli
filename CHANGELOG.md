@@ -9,8 +9,7 @@ an increase to the minimum supported Rust version is not treated as a breaking c
 - `cms encrypt --secret-key` writes an EncryptedData under a key the parties share, and
   `cms decrypt --secret-key` decrypts one, as `openssl cms -EncryptedData_encrypt` and
   `-EncryptedData_decrypt` do. `--content` defaults to aes256-cbc for it, as EncryptedData does not
-  authenticate. Software and OpenSSL encrypt under a given key; the other `--crypto` choices
-  decline with `--only`, and every choice decrypts.
+  authenticate. Every `--crypto` choice encrypts and decrypts it.
 - EnvelopedData is built with cms's `EnvelopedDataBuilder`, through certval-cms's
   `ContentEncryptor` over the environment.
 

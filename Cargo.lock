@@ -308,8 +308,7 @@ dependencies = [
 [[package]]
 name = "certval-awslc"
 version = "0.1.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4a1d72fdd5a93c36b3d9ce3c362fad05c5500659c18930fc291a4146eceeaee"
+source = "git+https://github.com/carl-wallace/certval-awslc?branch=pluggable_content_encryption#ca04c883bc9e0452e337aecd74ea80756a9b3102"
 dependencies = [
  "aws-lc-rs",
  "certval",
@@ -396,8 +395,7 @@ dependencies = [
 [[package]]
 name = "certval-cng"
 version = "0.1.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "677b33fad57a3549a0f6b9438ed90580885528826ce592525a698edc857f853a"
+source = "git+https://github.com/carl-wallace/certval-cng?branch=pluggable_content_encryption#fb42682ed486e25c27e735fd97faeaa2b1361c16"
 dependencies = [
  "certval",
  "certval-cms",
@@ -452,8 +450,7 @@ dependencies = [
 [[package]]
 name = "certval-security-framework"
 version = "0.1.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89653928b9406ccb78111add1d30021d7a7091264dc3f3349ad3e3ee954fcf9b"
+source = "git+https://github.com/carl-wallace/certval-security-framework?branch=pluggable_content_encryption#a8a660a9790cf9080faa0b18a14b1570e93aa4b5"
 dependencies = [
  "certval",
  "certval-cms",

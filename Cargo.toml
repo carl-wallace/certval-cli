@@ -92,6 +92,10 @@ x509-cert = { git = "https://github.com/carl-wallace/formats", branch = "pluggab
 certval-cms = { git = "https://github.com/carl-wallace/certval-cms", branch = "pluggable_content_encryption" }
 # certval-openssl from its branch, whose OpenSSL content encryption takes a given key (EncryptedData).
 certval-openssl = { git = "https://github.com/carl-wallace/certval-openssl", branch = "pluggable_content_encryption" }
+# The other providers from their branches, whose content encryption takes a given key too.
+certval-awslc = { git = "https://github.com/carl-wallace/certval-awslc", branch = "pluggable_content_encryption" }
+certval-security-framework = { git = "https://github.com/carl-wallace/certval-security-framework", branch = "pluggable_content_encryption" }
+certval-cng = { git = "https://github.com/carl-wallace/certval-cng", branch = "pluggable_content_encryption" }
 # certval from rust-pki pre-release, which compiles against the cms above (RustCrypto/formats#2535).
 # Remove when a certval release carries it.
 certval = { git = "https://github.com/carl-wallace/rust-pki", branch = "pre-release" }
