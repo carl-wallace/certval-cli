@@ -35,6 +35,14 @@
 # openssl choice is not offered on Windows). Git's own openssl is 3.1, which leaves ML-DSA and
 # ML-KEM out; -s names a newer one, such as the OpenSSL winget installs.
 #
+# A certval built with --no-default-features --features awslc-fips runs --crypto aws-lc on
+# AWS-LC's FIPS module. Linux links the module statically. On macOS and Windows it is a shared
+# library, which a release ships beside the binary but cargo leaves under its build directory, so a
+# certval built with cargo does not start on its own. Then the script finds the library under
+# build/aws-lc-fips-sys-*/out/build/artifacts beside the binary (or in --fips-lib-dir) and runs
+# certval, and only certval, with that directory on DYLD_LIBRARY_PATH (macOS) or PATH (Windows).
+# The summary says which aws-lc the binary has, from `certval list-crypto`.
+#
 # Each case runs first with --only, so that the choice alone performs it. When that fails, it runs
 # again without --only, with software behind the choice:
 #
@@ -53,7 +61,7 @@
 #   scripts/openssl-interop.sh [-c CERTVAL] [-s OPENSSL] [-w WORKDIR] [--crypto LIST]
 #                              [--ops decrypt,encrypt,sign,verify,issue,crl,ocsp,req]
 #                              [--pkcs11-module FILE] [--pkcs11-token LABEL] [--pkcs11-pin PIN]
-#                              [--log FILE]
+#                              [--log FILE] [--fips-lib-dir DIR]
 #
 #   -c CERTVAL        the certval binary, built with the openssl feature to include that choice;
 #                     defaults to $CERTVAL, then certval on PATH
@@ -71,6 +79,10 @@
 #   --log FILE        writes every openssl, certval and pkcs11-tool command the script runs to FILE,
 #                     under a comment line for each case, ready to paste into a shell (the PIN
 #                     included)
+#   --fips-lib-dir DIR
+#                     the directory holding AWS-LC's FIPS module (libaws_lc_fips_*_crypto.dylib on
+#                     macOS, aws_lc_fips_*_crypto.dll on Windows), for a certval that does not
+#                     start on its own; by default it is looked for beside the binary as above
 #
 # For pkcs11, the RSA and EC keys are put on the token with pkcs11-tool (OpenSC) as token objects
 # with an ID of this run's own, and removed when the script exits. Decrypting takes the key by the
@@ -93,6 +105,7 @@ PKCS11_MODULE=${CERTVAL_PKCS11_MODULE:-}
 PKCS11_TOKEN=${CERTVAL_PKCS11_TOKEN_LABEL:-}
 PKCS11_PIN=${CERTVAL_PKCS11_USER_PIN:-}
 LOG=
+FIPS_LIB_DIR=
 
 usage() {
     sed -n '/^# Usage:/,/^# For pkcs11/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//' >&2
@@ -110,6 +123,7 @@ while [ $# -gt 0 ]; do
         --pkcs11-token) PKCS11_TOKEN=$2; shift 2 ;;
         --pkcs11-pin) PKCS11_PIN=$2; shift 2 ;;
         --log) LOG=$2; shift 2 ;;
+        --fips-lib-dir) FIPS_LIB_DIR=$2; shift 2 ;;
         -h|--help) usage ;;
         *) echo "unknown argument: $1" >&2; usage ;;
     esac
@@ -121,6 +135,36 @@ command -v "$OPENSSL" >/dev/null || { echo "openssl not found: $OPENSSL" >&2; ex
 absolute() { local p; p=$(command -v "$1"); case $p in /*) echo "$p" ;; *) echo "$(cd "$(dirname "$p")" && pwd)/$(basename "$p")" ;; esac; }
 CERTVAL=$(absolute "$CERTVAL")
 OPENSSL=$(absolute "$OPENSSL")
+
+# A FIPS build whose AWS-LC module is a shared library cargo left in its build directory (see the
+# top of this file): when certval does not start on its own, or --fips-lib-dir is given, find the
+# library and run certval with its directory on the loader's path. LOADER_ENV holds that one
+# NAME=VALUE for env, so openssl never sees it.
+LOADER_ENV=()
+if [ -n "$FIPS_LIB_DIR" ] || ! "$CERTVAL" list-crypto >/dev/null 2>&1; then
+    case $(uname -s) in
+        Darwin) loader_var=DYLD_LIBRARY_PATH; fips_lib='libaws_lc_fips_*_crypto.dylib' ;;
+        MINGW*|MSYS*) loader_var=PATH; fips_lib='aws_lc_fips_*_crypto.dll' ;;
+        *) echo "$CERTVAL does not run" >&2; exit 2 ;;
+    esac
+    if [ -z "$FIPS_LIB_DIR" ]; then
+        # The newest, should several builds of aws-lc-fips-sys sit side by side.
+        lib=$(ls -t "$(dirname "$CERTVAL")"/build/aws-lc-fips-sys-*/out/build/artifacts/$fips_lib 2>/dev/null | head -1 || true)
+        [ -n "$lib" ] || { echo "$CERTVAL does not run, and there is no $fips_lib under $(dirname "$CERTVAL")/build to run it with; name its directory with --fips-lib-dir" >&2; exit 2; }
+        FIPS_LIB_DIR=$(dirname "$lib")
+    fi
+    FIPS_LIB_DIR=$(cd "$FIPS_LIB_DIR" && pwd)
+    if [ "$loader_var" = PATH ]; then
+        LOADER_ENV=("PATH=$FIPS_LIB_DIR:$PATH")
+    else
+        LOADER_ENV=("$loader_var=$FIPS_LIB_DIR")
+    fi
+fi
+# certval ARGS...: the certval binary, with LOADER_ENV when there is one.
+certval() { env ${LOADER_ENV[@]+"${LOADER_ENV[@]}"} "$CERTVAL" "$@"; }
+certval list-crypto >/dev/null 2>&1 || { echo "$CERTVAL does not run${FIPS_LIB_DIR:+ with $FIPS_LIB_DIR on the loader path}" >&2; exit 2; }
+# The aws-lc line of the listing, which says "(FIPS module)" in a FIPS build.
+AWSLC_LINE=$(certval list-crypto | awk '$1 == "aws-lc"' || true)
 [ -n "$WORK" ] || WORK=$(mktemp -d "${TMPDIR:-/tmp}/certval-openssl-interop.XXXXXX")
 mkdir -p "$WORK"
 WORK=$(cd "$WORK" && pwd)
@@ -147,7 +191,7 @@ logcase() {
 }
 
 # The choices the binary offers, from its short help: "[possible values: software, openssl, ...]".
-help=$("$CERTVAL" cms decrypt -h)
+help=$(certval cms decrypt -h)
 offered=$(printf '%s\n' "$help" | awk '/--crypto/ {c = 1} c && /possible values:/ {sub(/.*possible values: /, ""); sub(/\].*/, ""); gsub(/ /, ""); print; exit}')
 [ -n "$offered" ] || { echo "could not read the --crypto choices from certval cms decrypt -h" >&2; exit 2; }
 if [ -z "$CRYPTOS" ]; then
@@ -161,9 +205,9 @@ BACKENDS=$(printf '%s\n' "$CRYPTOS" | tr ',' ' ')
 
 # issue, crl and ocsp need `certval ca`, which older binaries do not have.
 HAS_CA=0
-"$CERTVAL" ca -h >/dev/null 2>&1 && HAS_CA=1
+certval ca -h >/dev/null 2>&1 && HAS_CA=1
 HAS_REQ=0
-"$CERTVAL" req -h >/dev/null 2>&1 && HAS_REQ=1
+certval req -h >/dev/null 2>&1 && HAS_REQ=1
 if [ -z "$OPS" ]; then
     OPS=decrypt,encrypt,sign,verify
     if [ "$HAS_CA" = 1 ]; then OPS=$OPS,issue,crl,ocsp; else echo "certval has no ca command: issue, crl and ocsp left out"; fi
@@ -365,8 +409,8 @@ key_args() {
 
 cv() {
     local status=0
-    logcmd "$CERTVAL" "$@"
-    (cd "$PKI" && "$CERTVAL" "$@") > "$CV_OUT" 2> "$CV_ERR" || status=$?
+    logcmd ${LOADER_ENV[@]+env "${LOADER_ENV[@]}"} "$CERTVAL" "$@"
+    (cd "$PKI" && certval "$@") > "$CV_OUT" 2> "$CV_ERR" || status=$?
     LAST_CMD="certval $*"
     return $status
 }
@@ -835,6 +879,8 @@ fi
 
 {
     echo "certval: $CERTVAL"
+    [ -z "$AWSLC_LINE" ] || echo "aws-lc:  $(printf '%s\n' "$AWSLC_LINE" | sed 's/^aws-lc *//')"
+    [ -z "$FIPS_LIB_DIR" ] || echo "FIPS module library: $FIPS_LIB_DIR"
     echo "openssl: $OPENSSL ($("$OPENSSL" version))"
     echo "choices: $BACKENDS"
     [ "$PQ_SIG" = 1 ] || echo "left out: ML-DSA (openssl $version is older than 3.5)"
