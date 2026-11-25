@@ -139,9 +139,12 @@ OPENSSL=$(absolute "$OPENSSL")
 # A FIPS build whose AWS-LC module is a shared library cargo left in its build directory (see the
 # top of this file): when certval does not start on its own, or --fips-lib-dir is given, find the
 # library and run certval with its directory on the loader's path. LOADER_ENV holds that one
-# NAME=VALUE for env, so openssl never sees it.
+# NAME=VALUE for env, so openssl never sees it. The first try is a { } group with its stderr
+# redirected: a certval that cannot load the library aborts, and bash reports that on its own
+# stderr, which the group's redirection covers (a subshell does not: bash runs its last command
+# without forking again, so the outer shell still reports it).
 LOADER_ENV=()
-if [ -n "$FIPS_LIB_DIR" ] || ! "$CERTVAL" list-crypto >/dev/null 2>&1; then
+if [ -n "$FIPS_LIB_DIR" ] || ! { "$CERTVAL" list-crypto; } >/dev/null 2>&1; then
     case $(uname -s) in
         Darwin) loader_var=DYLD_LIBRARY_PATH; fips_lib='libaws_lc_fips_*_crypto.dylib' ;;
         MINGW*|MSYS*) loader_var=PATH; fips_lib='aws_lc_fips_*_crypto.dll' ;;
