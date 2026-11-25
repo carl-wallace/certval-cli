@@ -27,8 +27,8 @@
 #            key, RSA also with PSS. pkcs11 is n/a: req takes no key on a token yet
 #
 # A test CA and keys are made with openssl in WORKDIR. ML-DSA needs openssl 3.5, and ML-KEM in CMS
-# 3.6; with an older openssl those cases are left out and the summary says so. One case is expected
-# to be refused by every choice: ECDH with openssl's default SHA-1 KDF, which certval-cms does not
+# 3.6; with an older openssl those cases are left out and the summary says so. One case is not
+# supported by any choice: ECDH with openssl's default SHA-1 KDF, which certval-cms does not
 # offer.
 #
 # On Windows the script runs under Git for Windows' bash, with a certval.exe built there (the
@@ -46,16 +46,17 @@
 # Each case runs first with --only, so that the choice alone performs it. When that fails, it runs
 # again without --only, with software behind the choice:
 #
-#   ok       the choice performed it alone, and openssl agrees with the result
-#   sw       the choice declined part of it and software answered (e.g. GCM under Security.framework)
-#   no       the choice declined, and software could not stand in, because the choice's own key
-#            performs the operation (e.g. ML-DSA signing under AWS-LC)
-#   n/a      the choice has no key for it (PKCS #11 holds only the keys pkcs11-tool can import)
-#   refused  certval refused a case it is expected to refuse
-#   FAIL     certval failed for a reason other than declining
-#   DIFFER   certval succeeded and openssl did not accept or match the result, or the reverse for
-#            an expected refusal
-#   OSSL     openssl could not make the input for the case (the row is openssl's limit)
+#   ok           the choice performed it alone, and openssl agrees with the result
+#   sw           the choice declined part of it and software answered (e.g. GCM under
+#                Security.framework)
+#   no           the choice declined, and software could not stand in, because the choice's own
+#                key performs the operation (e.g. ML-DSA signing under AWS-LC)
+#   n/a          the choice has no key for it (PKCS #11 holds only the keys pkcs11-tool can import)
+#   unsupported  certval does not support the case under any choice (ECDH with the SHA-1 KDF)
+#   FAIL         certval failed for a reason other than declining
+#   DIFFER       certval succeeded and openssl did not accept or match the result, or certval
+#                succeeded with an unsupported case
+#   OSSL         openssl could not make the input for the case (the row is openssl's limit)
 #
 # Usage:
 #   scripts/openssl-interop.sh [-c CERTVAL] [-s OPENSSL] [-w WORKDIR] [--crypto LIST]
@@ -90,8 +91,8 @@
 # is put on a second time with its CA certificate, for issue, crl and ocsp, which take the CA's key
 # by --cert as well. The delegated OCSP responder's key stays a file, so pkcs11 is n/a for it.
 #
-# Exit status: 0 when every cell is ok, sw, no, n/a or refused; 1 when any is FAIL, DIFFER or OSSL;
-# 2 on a usage error. Every non-ok cell's commands and messages are in WORKDIR/report.txt, the
+# Exit status: 0 when every cell is ok, sw, no, n/a or unsupported; 1 when any is FAIL, DIFFER or
+# OSSL; 2 on a usage error. Every non-ok cell's commands and messages are in WORKDIR/report.txt, the
 # matrix in WORKDIR/summary.txt and one line per cell in WORKDIR/results.tsv.
 
 set -euo pipefail
@@ -432,7 +433,7 @@ note() {
 
 # attempt BACKEND EXPECT CHECK ARGS...: runs certval ARGS with --crypto BACKEND, with --only and
 # then without it if that fails, runs CHECK (a function) on success, and records the outcome.
-# EXPECT is ok, or refuse for a case certval is expected to refuse.
+# EXPECT is ok, or unsupported for a case certval does not support under any choice.
 attempt() {
     local b=$1 expect=$2 check=$3
     shift 3
@@ -440,8 +441,8 @@ attempt() {
     [ "$b" != pkcs11 ] || cargs+=("${P11_ARGS[@]}")
     local only_err outcome
     if cv "$@" "${cargs[@]}" --only; then
-        if [ "$expect" = refuse ]; then
-            outcome=DIFFER; note "$b" "$outcome" "expected a refusal, but certval succeeded: $LAST_CMD"
+        if [ "$expect" = unsupported ]; then
+            outcome=DIFFER; note "$b" "$outcome" "expected unsupported, but certval succeeded: $LAST_CMD"
         elif $check; then
             outcome=ok
         else
@@ -450,8 +451,8 @@ attempt() {
         record "$b" "$outcome"; return
     fi
     only_err=$(cat "$CV_ERR")
-    if [ "$expect" = refuse ]; then
-        record "$b" refused; return
+    if [ "$expect" = unsupported ]; then
+        record "$b" unsupported; return
     fi
     if [ "$b" != software ] && cv "$@" "${cargs[@]}"; then
         if $check; then
@@ -568,7 +569,7 @@ if wanted decrypt; then
                 "-keyopt ecdh_kdf_md:$h -keyopt ecdh_cofactor_mode:1"
         done
     done
-    decrypt_case "p256 ecdh-sha1 (openssl's default) aes-256-cbc" p256 p256 refuse aes-256-cbc "" ""
+    decrypt_case "p256 ecdh-sha1 (openssl's default) aes-256-cbc" p256 p256 unsupported aes-256-cbc "" ""
     for k in $KEM_KEYS; do
         for c in aes-256-cbc aes-256-gcm; do
             decrypt_case "$k $c" "$k" "$k" ok "$c" "" ""
